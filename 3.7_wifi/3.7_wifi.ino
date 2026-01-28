@@ -7,6 +7,8 @@
 // Upload Speed: "460800" (Board will not upload if this is not set) 
 
 
+// Import needed libraries
+#include <PubSubClient.h>
 #include <FastLED.h>
 #include <QRCodeGenerator.h>
 #include <WiFiManager.h>
@@ -14,8 +16,30 @@
 #include "EPD.h"
 #include "EPD_GUI.h"
 #include <WiFi.h>
+#include <ArduinoJson.h>
+#include <ArduinoJson.hpp>
+#include <EEPROM.h>
+#include <Preferences.h>
 
+// Declare the WiFiManager and Preferences(for non-volitile storage) to use in code
 WiFiManager wifiManager;
+Preferences prefs;
+
+// Declare strings
+String SERVICE_UUID = "";
+String ReportTopic;
+String SubscribeTopic;
+String WiFi_ID;
+String str = "test";
+
+// Mqtt topics
+const char *wifiID;
+const char *reportTopic ;
+const char *subscribeTopic ;
+
+
+// SETUP WIFI AND MQQT CLIENTS
+WiFiClient      Wifi_net;
 
 #define NUM_LEDS 100
 #define DATA_PIN 8
@@ -31,30 +55,85 @@ void drawWifiIcon();
 
 uint64_t chipid;
 char chipIdStr[32];
+char shortId[7];
+
+///////////////// MQTT Broker Setup //////////////////////////
+const char* mqttServer = "mqttbroker.tetontechnology.com";        
+const char* brokerName = "fuelbroker";
+const char* brokerPassword = "N3tJPFTHYYNcsHw";
+
+void WiFi_callback(char* topic, byte* payload, unsigned int length){}
+
+PubSubClient    mqttClient(mqttServer, 1883, WiFi_callback, Wifi_net);
+
+bool mqttConnect() {
+  mqttClient.setServer(mqttServer, 1883);
+  mqttClient.setCallback(WiFi_callback);
+  while (!mqttClient.connected()) {
+    if (mqttClient.connect(wifiID, brokerName, brokerPassword)) {
+      mqttClient.subscribe(subscribeTopic);
+      Serial.print("Connected to MQTT on topic ");
+      Serial.println(SubscribeTopic);
+      mqttClient.publish(reportTopic, shortId);
+      return true;
+    } 
+    else {
+      delay(5000);
+      Serial.println("Failed to connect on MQTT");
+    }
+  }
+}
+
+bool requestRegister() {
+  if (!mqttClient.connected()) return false;
+  
+  doc["chipId"] = SERVICE_UUID;
+  doc["code"] = shortId;
+
+  char out[128];
+  size_t n = serializeJson(doc, out, sizeof(out));
+
+  return mqttClient.publish(reportTopic, out, n);
+}
+
 
 // ----------------------------------------------------
 // SETUP
 // ----------------------------------------------------
 void setup() {
   Serial.begin(115200);
-
   pinMode(7, OUTPUT);
   digitalWrite(7, HIGH);
-
-  // wifiManager.resetSettings();
-
-  FastLED.addLeds<WS2812, DATA_PIN, RGB>(leds, NUM_LEDS);
-
   chipid = ESP.getEfuseMac();
+
+  snprintf(shortId, sizeof(shortId), "%06X", (uint32_t)(chipid & 0xFFFFFF));
+  // EEPROM.begin(512);
+
+  SERVICE_UUID = "mqtt" + (String)chipid;
+
   sprintf(chipIdStr, "%04X%08X",
           (uint16_t)(chipid >> 32),
           (uint32_t)chipid);
+
+  /////////////////// Setup MQTT topics ///////////////////////
+  ReportTopic = "wh/register/" + SERVICE_UUID;
+  SubscribeTopic = "wh/device/" + SERVICE_UUID;
+
+  reportTopic = ReportTopic.c_str();
+  subscribeTopic = SubscribeTopic.c_str();
+  ////////////////////////////////////////////////////////////
+ 
+  // wifiManager.resetSettings();
+
+  FastLED.addLeds<WS2812, DATA_PIN, RGB>(leds, NUM_LEDS);
 
   // ----- EPD INIT -----
   EPD_GPIOInit();
   EPD_Init();
 
-  Paint_NewImage(ImageBW, EPD_W, EPD_H, Rotation, WHITE);
+  wifiID = WiFi_ID.c_str();
+
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
   Paint_Clear(WHITE);
 
   // BOOT SCREEN
@@ -63,6 +142,17 @@ void setup() {
   EPD_Update();
 
   delay(1500); // allow panel to settle
+
+  // prefs.begin("cart", false);
+  // prefs.putString("chipId", SERVICE_UUID);
+  // prefs.end();
+
+  // prefs.begin("cart", true);
+  // String id = prefs.getString("chipId", "");
+  // prefs.end();
+
+  // Serial.println(id);
+  // delay(5000);
 
   // ----- WIFI INIT (NON-BLOCKING) -----
   WiFi.mode(WIFI_STA);
@@ -82,6 +172,11 @@ void setup() {
   while (result == 0) {
     result = wifiManager.autoConnect("Cart Setup");
   }
+  
+  if (mqttConnect()) {
+    requestRegister();
+  }
+  
   showConnectedDashboard();
 }
 
@@ -120,7 +215,7 @@ void showConnectedDashboard() {
   EPD_FastInit();
   EPD_Display_Clear();
 
-  Paint_NewImage(ImageBW, EPD_W, EPD_H, 180, WHITE);
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
   Paint_Clear(WHITE);
 
   // Title
@@ -164,7 +259,7 @@ void showPortalScreen() {
   EPD_FastInit();
   EPD_Display_Clear();
 
-  Paint_NewImage(ImageBW, EPD_W, EPD_H, 180, WHITE);  // Create a new white background image.
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);  // Create a new white background image.
   Paint_Clear(WHITE);  // Clear the canvas.
 
   EPD_ShowString(10, 10, "WIFI SETUP REQUIRED", 16, BLACK);
@@ -182,7 +277,7 @@ void showLostConnectionScreen() {
   EPD_FastInit();
   EPD_Display_Clear();
 
-  Paint_NewImage(ImageBW, EPD_W, EPD_H, 180, WHITE);  // Create a new white background image.
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);  // Create a new white background image.
   Paint_Clear(WHITE);  // Clear the canvas.
 
   EPD_ShowString(10, 10, "WIFI CONNECTION LOST", 16, BLACK);
