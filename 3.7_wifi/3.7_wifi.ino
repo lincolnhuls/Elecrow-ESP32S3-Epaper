@@ -21,9 +21,12 @@
 #include <EEPROM.h>
 #include <Preferences.h>
 
-// Declare the WiFiManager and Preferences(for non-volitile storage) to use in code
+// Declare the WiFiManager and Preferences(non-volitile storage) to use in code
 WiFiManager wifiManager;
 Preferences prefs;
+
+// Flag for it registering needs to happen
+bool registered = false;
 
 // Declare strings
 String SERVICE_UUID = "";
@@ -37,10 +40,10 @@ const char *wifiID;
 const char *reportTopic ;
 const char *subscribeTopic ;
 
-
-// SETUP WIFI AND MQQT CLIENTS
+// Setup WiFi Client
 WiFiClient      Wifi_net;
 
+// Led setup
 #define NUM_LEDS 100
 #define DATA_PIN 8
 CRGB leds[NUM_LEDS];
@@ -53,19 +56,69 @@ char buffer[200];
 int rssiToBars(long rssi);
 void drawWifiIcon();
 
+// Declare space for chipid and shortId
 uint64_t chipid;
 char chipIdStr[32];
 char shortId[7];
+
+// callback helpers
+volatile bool mqttMsgReady = false;
+char mqttTopicBuff[128];
+char mqttPayloadBuff[256];
+
+// Declare space for secret from preferences
+String secret;
 
 ///////////////// MQTT Broker Setup //////////////////////////
 const char* mqttServer = "mqttbroker.tetontechnology.com";        
 const char* brokerName = "fuelbroker";
 const char* brokerPassword = "N3tJPFTHYYNcsHw";
 
-void WiFi_callback(char* topic, byte* payload, unsigned int length){}
+// Wifi callback for digesting commands over Mqtt
+void WiFi_callback(char* topic, byte* payload, unsigned int length) {
+  // Copy topic
+  strncpy(mqttTopicBuff, topic, sizeof(mqttTopicBuff));
+  mqttTopicBuff[sizeof(mqttTopicBuff) - 1] = '\0';
 
+  // Copy payload
+  size_t n = (length < sizeof(mqttPayloadBuff) - 1) ? length : (sizeof(mqttPayloadBuff) - 1);
+  memcpy(mqttPayloadBuff, payload, n);
+  mqttPayloadBuff[n] = '\0';
+
+  mqttMsgReady = true;
+}
+
+void handleMqttMessage() {
+  if (!mqttMsgReady) return;
+  mqttMsgReady = false;
+
+  if (strcmp(mqttTopicBuff, subscribeTopic) != 0) return;
+
+  StaticJsonDocument<128> doc;
+  DeserializationError err = deserializeJson(doc, mqttPayloadBuff);
+  if (err) {
+    Serial.print("MQTT JSON parse failed: ");
+    Serial.println(err.c_str());
+    return;
+  }
+
+  const char* s = doc["secret"] | "";
+  if (s[0] == '\0') return;
+
+  prefs.begin("secret", false);
+  prefs.putString("secret", s);
+  prefs.end();
+
+  secret = s;
+  registered = true;
+
+  Serial.println("Registered, secret saved");
+} 
+
+// Set up Mqtt Client 
 PubSubClient    mqttClient(mqttServer, 1883, WiFi_callback, Wifi_net);
 
+// Initial mqtt connect function
 bool mqttConnect() {
   mqttClient.setServer(mqttServer, 1883);
   mqttClient.setCallback(WiFi_callback);
@@ -84,9 +137,11 @@ bool mqttConnect() {
   }
 }
 
+// Function to call once a device has wifi and mqtt connection for registering it with the organization
 bool requestRegister() {
   if (!mqttClient.connected()) return false;
   
+  StaticJsonDocument<128> doc;
   doc["chipId"] = SERVICE_UUID;
   doc["code"] = shortId;
 
@@ -106,22 +161,16 @@ void setup() {
   digitalWrite(7, HIGH);
   chipid = ESP.getEfuseMac();
 
+  // Create small code for wh connection
   snprintf(shortId, sizeof(shortId), "%06X", (uint32_t)(chipid & 0xFFFFFF));
-  // EEPROM.begin(512);
 
+  // Build service uuid using chip id
   SERVICE_UUID = "mqtt" + (String)chipid;
 
+  // Make readable chip id string
   sprintf(chipIdStr, "%04X%08X",
           (uint16_t)(chipid >> 32),
           (uint32_t)chipid);
-
-  /////////////////// Setup MQTT topics ///////////////////////
-  ReportTopic = "wh/register/" + SERVICE_UUID;
-  SubscribeTopic = "wh/device/" + SERVICE_UUID;
-
-  reportTopic = ReportTopic.c_str();
-  subscribeTopic = SubscribeTopic.c_str();
-  ////////////////////////////////////////////////////////////
  
   // wifiManager.resetSettings();
 
@@ -131,10 +180,41 @@ void setup() {
   EPD_GPIOInit();
   EPD_Init();
 
+  // Get wifi id
   wifiID = WiFi_ID.c_str();
 
   Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
   Paint_Clear(WHITE);
+  
+  // True means that namespace can be read but not written to, false is read and write
+  // Ready from prefs to find if a secret key is stored
+  prefs.begin("secret", true);
+  secret = prefs.getString("secret", "");
+  prefs.end();
+
+  // If the secret is not empty then we know that the device has been registered
+  if (secret != "") {
+    registered = true;
+  } 
+  // If not we need to go through the register process
+  else {
+    registered = false;
+  }
+
+  /////////////////// Setup MQTT topics ///////////////////////
+  ReportTopic = "wh/register/" + SERVICE_UUID;
+  SubscribeTopic = "wh/device/" + SERVICE_UUID;
+
+  reportTopic = ReportTopic.c_str();
+  subscribeTopic = SubscribeTopic.c_str();
+  ////////////////////////////////////////////////////////////
+
+  // prefs.begin("secret", false);
+  // prefs.putString("chipId", SERVICE_UUID);
+  // prefs.end();
+
+  // Serial.println(id);
+  // delay(5000);
 
   // BOOT SCREEN
   EPD_ShowString(10, 10, "Connecting to WiFi...", 16, BLACK);
@@ -142,17 +222,6 @@ void setup() {
   EPD_Update();
 
   delay(1500); // allow panel to settle
-
-  // prefs.begin("cart", false);
-  // prefs.putString("chipId", SERVICE_UUID);
-  // prefs.end();
-
-  // prefs.begin("cart", true);
-  // String id = prefs.getString("chipId", "");
-  // prefs.end();
-
-  // Serial.println(id);
-  // delay(5000);
 
   // ----- WIFI INIT (NON-BLOCKING) -----
   WiFi.mode(WIFI_STA);
@@ -173,17 +242,25 @@ void setup() {
     result = wifiManager.autoConnect("Cart Setup");
   }
   
-  if (mqttConnect()) {
-    requestRegister();
+  // If not registered, request register
+  if (!registered) {
+    if (mqttConnect()) {
+      requestRegister();
+    }
   }
-  
-  showConnectedDashboard();
+  // If registered, show connected dashboard
+  if (registered) {
+    if (mqttConnect()) {
+      showConnectedDashboard();
+    }
+  }
 }
 
 // ----------------------------------------------------
 // LOOP (FULLY NON-BLOCKING)
 // ----------------------------------------------------
 void loop() {
+  ///////////////////// WiFi reconnect on disconnect ///////////////////////////
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Lost Connection");
     showLostConnectionScreen();
@@ -196,16 +273,17 @@ void loop() {
       result = wifiManager.autoConnect("Cart Setup");
     }
   }
-  for (int i = 0; i < NUM_LEDS; i++) {
-    leds[i] = CRGB::Green;
+  /////////////////////////////////////////////////////////////////////////////
+
+  ///////////////////// Mqtt reconnect on disconnect //////////////////////////
+  if (!mqttClient.connected()) {
+    mqttConnect();
   }
-  FastLED.show();
-  delay(500);
-  for (int i = 0; i < NUM_LEDS; i++) {
-    leds[i] = CRGB::Black;
-  }
-  FastLED.show();
-  delay(500);
+  /////////////////////////////////////////////////////////////////////////////
+
+  mqttClient.loop();
+  handleMqttMessage();
+
 }
 
 // ----------------------------------------------------
