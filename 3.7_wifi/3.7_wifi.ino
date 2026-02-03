@@ -29,6 +29,41 @@ bool registered = false;
 bool registeringScreenShown = false;
 bool connectedScreenShown = false;
 
+// Led helpers
+bool ledsActive = false;
+uint32_t ledsOffAtMs = 0;
+uint8_t lastBrightness = 255;
+
+// Blink Aids
+bool blinkActive = false;
+bool blinkIsOn = false;
+uint32_t blinkNextToggleMs = 0;
+
+uint16_t blinkIntervalMs = 0;
+uint16_t blinkRemaining = 0;
+
+uint8_t blinkR, blinkG, blinkB;
+uint8_t blinkBrightness = 255;
+uint16_t blinkStart, blinkCount;
+
+// Breate Aids
+bool breatheActive = false;
+uint32_t breatheStartMs = 0;
+uint32_t breatheHalfPeriodMs = 1000;
+
+uint8_t breatheR, breatheG, breatheB;
+uint8_t breatheMaxBrightness = 255;
+uint16_t breatheStart, breatheCount;
+
+uint32_t breatheNextFrameMs = 0;
+uint32_t breatheLastFrameMs = 0;
+const uint16_t BREATHE_FRAME_MS = 15; // ~66 FPS (try 10–20)
+
+uint16_t breathePhase16 = 0;
+uint16_t breathePhaseStep = 0;
+uint8_t lastBreatheBrightness = 255;
+
+
 // Timers to help with state transitions
 unsigned long lastMqttAttemptMs = 0;
 unsigned long lastRegisterAttemptMs = 0;
@@ -84,6 +119,153 @@ String secret;
 const char* mqttServer = "mqttbroker.tetontechnology.com";        
 const char* brokerName = "fuelbroker";
 const char* brokerPassword = "N3tJPFTHYYNcsHw";
+
+////////////////////////////////////// Led Functions //////////////////////////////////////
+
+void on(uint8_t red=255, uint8_t green=255, uint8_t blue=255, uint16_t duration_s=-1, uint8_t brightness=255, uint16_t start_index=0, uint16_t indexCount=1) {
+  lastBrightness = brightness;
+  FastLED.setBrightness(brightness);
+
+  for (int i = 0; i < indexCount && (start_index + i) < NUM_LEDS; i++) {
+    int idx = start_index + i;
+    leds[idx].setRGB(red, green, blue); 
+  }
+  FastLED.show();
+
+  ledsActive = true;
+
+  if (duration_s < 0) {
+    ledsOffAtMs = 0;
+  } else {
+    ledsOffAtMs = millis() + (uint32_t)duration_s * 1000UL;
+  }
+}
+
+void blink(uint8_t red=255, uint8_t green=255, uint8_t blue=255, uint16_t interval_ms=500, uint8_t times=0, uint8_t brightness=255, uint16_t start_index=0, uint16_t indexCount=1) {
+  blinkR = red;
+  blinkG = green;
+  blinkB = blue;
+  blinkBrightness = brightness;
+  blinkStart = start_index;
+  blinkCount = indexCount;
+
+  blinkIntervalMs = interval_ms;
+  blinkRemaining = (times == 0) ? 0 : times * 2;
+
+  blinkIsOn = false;
+  blinkActive = true;
+  blinkNextToggleMs = millis();
+}
+
+void breathe(uint8_t red=255, uint8_t green=255, uint8_t blue=255, uint16_t duration_s=1, 
+uint8_t brightness=255, uint16_t start_index=0, uint16_t indexCount=1) {
+
+  breatheR = red;
+  breatheG = green;
+  breatheB = blue;
+
+  breatheMaxBrightness = brightness;
+  breatheStart = start_index;
+  breatheCount = indexCount;
+
+  breatheHalfPeriodMs = (uint32_t)duration_s * 1000UL;
+
+  uint32_t cycleMs = breatheHalfPeriodMs * 2UL;
+  if (cycleMs == 0) cycleMs = 1;
+
+  breathePhaseStep = (uint16_t)((65536UL * BREATHE_FRAME_MS) / cycleMs);
+  if (breathePhaseStep == 0) breathePhaseStep = 1;
+
+  breathePhase16 = (uint16_t)(64 << 8); // sin8(64) ~= 255 (start bright)
+  breatheLastFrameMs = millis();
+  lastBreatheBrightness = 255; // ok to keep, but optional
+
+  breatheActive = true;
+
+  // paint pixels once; ledTick modulates brightness
+  on(breatheR, breatheG, breatheB, -1, breatheMaxBrightness, breatheStart, breatheCount);
+}
+
+void off(uint16_t start_index = 0, uint16_t count = NUM_LEDS) {
+  for (uint16_t i = start_index; i < start_index + count && i < NUM_LEDS; i++) {
+    leds[i] = CRGB::Black;
+  }
+  FastLED.show();
+
+  ledsActive = false;   
+  ledsOffAtMs = 0;     
+}
+
+
+// Helper for non-blocking
+void ledTick() {
+  uint32_t now = millis();
+
+  // 1) Blink scheduler (highest priority)
+  if (blinkActive && (int32_t)(now - blinkNextToggleMs) >= 0) {
+    blinkNextToggleMs = now + blinkIntervalMs;
+
+    if (blinkIsOn) {
+      off(blinkStart, blinkCount);
+    } else {
+      on(blinkR, blinkG, blinkB,
+         -1,               // blink controls timing
+         blinkBrightness,
+         blinkStart,
+         blinkCount);
+    }
+
+    blinkIsOn = !blinkIsOn;
+
+    if (blinkRemaining > 0) {
+      blinkRemaining--;
+      if (blinkRemaining == 0) {
+        blinkActive = false;
+        off(blinkStart, blinkCount);
+      }
+    }
+    return; // prevent other schedulers from fighting this cycle
+  }
+
+  // 2) Breathe scheduler (next priority)
+  if (breatheActive) {
+    uint32_t elapsed = now - breatheLastFrameMs;
+    if (elapsed < BREATHE_FRAME_MS) return;
+
+    // number of frames to advance; cap catch-up to prevent jumps
+    uint32_t frames = elapsed / BREATHE_FRAME_MS;
+    if (frames > 3) frames = 3;
+
+    breatheLastFrameMs += frames * BREATHE_FRAME_MS;
+    breathePhase16 += (uint16_t)(frames * breathePhaseStep);
+
+    // use high byte as 0..255 phase for sin8
+    uint8_t phase8 = (uint8_t)(breathePhase16 >> 8);
+    uint8_t wave = sin8(phase8); // smooth 0..255..0..255
+
+    uint8_t curBrightness = (uint8_t)((uint32_t)breatheMaxBrightness * wave / 255UL);
+
+    if (curBrightness != lastBreatheBrightness) {
+      lastBreatheBrightness = curBrightness;
+      FastLED.setBrightness(curBrightness);
+      FastLED.show();
+    }
+    return;
+  }
+
+  // 3) Auto-off scheduler (for plain on(duration))
+  if (ledsActive && ledsOffAtMs != 0 && (int32_t)(now - ledsOffAtMs) >= 0) {
+    off();
+  }
+}
+
+void stopLedEffects() {
+  blinkActive = false;
+  breatheActive = false;
+  // (future effects go here)
+}
+///////////////////////////////////////////////////////////////////////////////////////////
+
 
 // Wifi callback for digesting commands over Mqtt
 void WiFi_callback(char* topic, byte* payload, unsigned int length) {
@@ -148,13 +330,78 @@ void handleMqttMessage() {
     return;
   }
 
-  // TODO: route by cmd
-  // if (strcmp(cmd, "led") == 0)      handleLedCommand(doc);
+  if (strcmp(cmd, "deregister") == 0) {
+    deregister();
+    return;
+  }
+
   if (strcmp(cmd, "test") == 0) {
     Serial.println("Recieved testing command");
+    return;
   }
-  // else if (strcmp(cmd, "blink") == 0) handleBlinkCommand(doc);
-  // else Serial.println("Unknown cmd");
+
+  if (strcmp(cmd, "on") == 0) {
+    stopLedEffects();
+    uint8_t r = doc["r"] | 255;
+    uint8_t g = doc["g"] | 255;
+    uint8_t b = doc["b"] | 255;
+
+    uint8_t brightness = doc["brightness"] | 255;
+    int16_t duration_s = doc["duration"] | -1;
+
+    uint16_t start = doc["start"] | 0;
+    uint16_t count = doc["count"] | NUM_LEDS;
+
+    on(r, g, b, duration_s, brightness, start, count);
+    return;
+  }
+
+  if (strcmp(cmd, "blink") == 0) {
+    stopLedEffects();
+    uint8_t r = doc["r"] | 255;
+    uint8_t g = doc["g"] | 255;
+    uint8_t b = doc["b"] | 255;
+
+    uint16_t interval_ms = doc["interval"] | 500;   
+    uint8_t times = doc["times"] | 0;              
+
+    uint8_t brightness = doc["brightness"] | 255;
+    uint16_t start = doc["start"] | 0;
+    uint16_t count = doc["count"] | NUM_LEDS;
+
+    blink(r, g, b, interval_ms, times, brightness, start, count);
+          
+    return;
+  }
+
+  if (strcmp(cmd, "breathe") == 0) {
+    stopLedEffects();
+    uint8_t r = doc["r"] | 255;
+    uint8_t g = doc["g"] | 255;
+    uint8_t b = doc["b"] | 255;
+
+    int16_t duration_s = doc["duration"] | 1;   // HALF cycle seconds
+    uint8_t brightness = doc["brightness"] | 255;
+
+    uint16_t start = doc["start"] | 0;
+    uint16_t count = doc["count"] | NUM_LEDS;
+
+    breathe(r, g, b, duration_s, brightness, start, count);
+    return;
+  }
+
+  if (strcmp(cmd, "off") == 0) {
+    stopLedEffects();
+    blinkActive = false;
+    uint16_t start = doc["start"] | 0;
+    uint16_t count = doc["count"] | NUM_LEDS;
+
+    off(start, count);
+    Serial.println("Executed OFF command");
+  }
+
+  Serial.print("Unknown cmd: ");
+  Serial.println(cmd);
 } 
 
 // Set up Mqtt Client 
@@ -175,6 +422,24 @@ void mqttConnectAttempt() {
     Serial.println("MQTT connected failed");
   }
 }
+void deregister() {
+  Serial.println("Deregister command recieved");
+
+  prefs.begin("secret", false);
+  prefs.remove("secret");
+  prefs.end();
+
+  secret = "";
+  registered = false;
+
+  connectedScreenShown = false;
+  registeringScreenShown = false;
+
+  mqttClient.disconnect();
+
+  showRegisteringScreen();
+}
+
 
 void registerAttempt() {
   if (registered) return;
@@ -395,6 +660,8 @@ void loop() {
 
   mqttConnectAttempt();
   heartbeat();
+
+  ledTick();
 
   if (!registered) {
     if (!registeringScreenShown) {
