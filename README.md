@@ -19,10 +19,20 @@ Use the following **exact** settings in the Arduino IDE or PlatformIO:
 
 ---
 
+### Reseting the Board
+
+To remove the device from its current adoption in the software use the following command
+```json
+{
+  "secret":"yourSecret",
+  "cmd":"deregister"
+}
+```
+
 ### Using the LEDs
 
 - **On**
-- Defaults to white staying on until off command is received
+  - Defaults to white staying on until off command is received
 ```json
 {
   "secret": "yourSecret",
@@ -48,7 +58,7 @@ Use the following **exact** settings in the Arduino IDE or PlatformIO:
 ```
 
 - **Blink**
-- Defaults to white, blinking every 500ms until off command is received
+  - Defaults to white, blinking every 500ms until off command is received
 ```json
 {
   "secret":"yourSecret",
@@ -65,7 +75,7 @@ Use the following **exact** settings in the Arduino IDE or PlatformIO:
 ```
 
 - **Breathe**
-- Defaults to white, breathing a full cycle every second until off command is received
+  - Defaults to white, breathing a full cycle every second until off command is received
 ```json
 {
   "secret":"yourSecret",
