@@ -47,11 +47,17 @@ To remove the device from its current adoption in the software use the following
 }
 ```
 
-- **Off**
+- **Breathe**
+  - Defaults to white, breathing a full cycle every second until off command is received
 ```json
 {
-  "secret": "yourSecret",
-  "cmd":"off",
+  "secret":"yourSecret",
+  "cmd":"breathe",
+  "r":yourRed,
+  "g":yourGreen,
+  "b":yourBLue,
+  "duration":durationInSecondsFromHighToLow,
+  "brightness":yourMaxBrightness,
   "start":firstPixelLedIndex,
   "count":howManyLedsInPixel
 }
@@ -74,19 +80,15 @@ To remove the device from its current adoption in the software use the following
 }
 ```
 
-- **Breathe**
-  - Defaults to white, breathing a full cycle every second until off command is received
+- **Off**
 ```json
 {
-  "secret":"yourSecret",
-  "cmd":"breathe",
-  "r":yourRed,
-  "g":yourGreen,
-  "b":yourBLue,
-  "duration":durationInSecondsFromHighToLow,
-  "brightness":yourMaxBrightness,
+  "secret": "yourSecret",
+  "cmd":"off",
   "start":firstPixelLedIndex,
   "count":howManyLedsInPixel
 }
 ```
+
+
 
