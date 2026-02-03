@@ -21,11 +21,12 @@ Use the following **exact** settings in the Arduino IDE or PlatformIO:
 
 ### Using the LEDs
 
-- **JSON**
+- **On**
+- Defaults to white staying on until off command is received
 ```json
 {
   "secret": "yourSecret",
-  "cmd":"yourLedCommand",
+  "cmd":"on",
   "red":yourRed,
   "green":yourGreen,
   "blue":yourBlue,
@@ -35,4 +36,31 @@ Use the following **exact** settings in the Arduino IDE or PlatformIO:
   "count":howManyLedsInPixel
 }
 ```
-- **Cmd Types** on, off
+
+- **Off**
+```json
+{
+  "secret": "yourSecret",
+  "cmd":"off",
+  "start":firstPixelLedIndex,
+  "count":howManyLedsInPixel
+}
+```
+
+- **Blink**
+- Defaults to white, blinking every 500ms until off command is received
+```json
+{
+  "secret":"yourSecret",
+  "cmd":"blink",
+  "r":yourRed,
+  "g":yourGreen,
+  "b":yourBLue,
+  "interval":blinkIntervalInMs,
+  "times":numberOfBlinks,
+  "brightness":yourBrightness,
+  "start":firstPixelLedIndex,
+  "count":howManyLedsInPixel
+}
+```
+
