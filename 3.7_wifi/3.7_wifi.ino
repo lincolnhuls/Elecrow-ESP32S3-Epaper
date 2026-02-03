@@ -57,12 +57,11 @@ uint16_t breatheStart, breatheCount;
 
 uint32_t breatheNextFrameMs = 0;
 uint32_t breatheLastFrameMs = 0;
-const uint16_t BREATHE_FRAME_MS = 15; // ~66 FPS (try 10–20)
+const uint16_t BREATHE_FRAME_MS = 15; 
 
 uint16_t breathePhase16 = 0;
 uint16_t breathePhaseStep = 0;
 uint8_t lastBreatheBrightness = 255;
-
 
 // Timers to help with state transitions
 unsigned long lastMqttAttemptMs = 0;
@@ -119,6 +118,8 @@ String secret;
 const char* mqttServer = "mqttbroker.tetontechnology.com";        
 const char* brokerName = "fuelbroker";
 const char* brokerPassword = "N3tJPFTHYYNcsHw";
+/////////////////////////////////////////////////////////////
+
 
 ////////////////////////////////////// Led Functions //////////////////////////////////////
 
@@ -335,11 +336,6 @@ void handleMqttMessage() {
     return;
   }
 
-  if (strcmp(cmd, "test") == 0) {
-    Serial.println("Recieved testing command");
-    return;
-  }
-
   if (strcmp(cmd, "on") == 0) {
     stopLedEffects();
     uint8_t r = doc["r"] | 255;
@@ -502,14 +498,16 @@ void showWifiSetupScreen(const char* apName) {
 
   // Left side
   EPD_ShowString(10, 10,  "WIFI SETUP REQUIRED", 16, BLACK);
-  EPD_ShowString(10, 30,  "Connect to AP:", 16, BLACK);
-  EPD_ShowString(10, 50,  apName, 16, BLACK);
-  EPD_ShowString(10, 75,  "Or scan QR to open", 16, BLACK);
-  EPD_ShowString(10, 95,  "setup portal", 16, BLACK);
-  EPD_ShowString(10, 125, "URL: 192.168.4.1", 16, BLACK);
-
+  EPD_ShowString(10, 50,  "Connect to AP:", 16, BLACK);
+  EPD_ShowString(10, 70,  apName, 16, BLACK);
+  EPD_ShowString(10, 90,  "Navitage to: ", 16, BLACK);
+  EPD_ShowString(10, 110,  "URL: 192.168.4.1", 16, BLACK);
+  EPD_ShowString(10, 150,  "Or scan QR to open", 16, BLACK);
+  EPD_ShowString(10, 170,  "setup portal", 16, BLACK);
+ 
   // Right side QR to portal
-  displayQRCodeOnEPD("http://192.168.4.1");
+  snprintf(buffer, sizeof(buffer), "WIFI:T:nopass;S:%s;;", apName);
+  displayQRCodeOnEPD(buffer);
 
   EPD_Display(ImageBW);
   EPD_Update();
@@ -714,6 +712,10 @@ void showConnectedDashboard() {
   // Chip ID
   snprintf(buffer, sizeof(buffer), "ChipID: %s", SERVICE_UUID.c_str());
   EPD_ShowString(10, 140, buffer, 16, BLACK);
+
+  // Short Id
+  snprintf(buffer, sizeof(buffer), "Code: %s", shortId);
+  EPD_ShowString(10, 160, buffer, 24, BLACK);
 
   // QR Code (right side)
   displayQRCodeOnEPD(SERVICE_UUID.c_str());
