@@ -18,27 +18,37 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <ArduinoJson.hpp>
-#include <EEPROM.h>
 #include <Preferences.h>
 
 // Declare the WiFiManager and Preferences(non-volitile storage) to use in code
 WiFiManager wifiManager;
 Preferences prefs;
 
-// Flag for it registering needs to happen
+// Flag for register state
 bool registered = false;
+bool registeringScreenShown = false;
+bool connectedScreenShown = false;
+
+// Timers to help with state transitions
+unsigned long lastMqttAttemptMs = 0;
+unsigned long lastRegisterAttemptMs = 0;
+
+// Timers for heartbeat
+unsigned long lastHeartbeatMs = 0;
+const unsigned long HEARTBEAT_PERIOD_MS = 30000;
 
 // Declare strings
 String SERVICE_UUID = "";
 String ReportTopic;
 String SubscribeTopic;
-String WiFi_ID;
-String str = "test";
+String HeartbeatTopic;
+String apName;
+String wifiID;
 
 // Mqtt topics
-const char *wifiID;
 const char *reportTopic ;
 const char *subscribeTopic ;
+const char *heartbeatTopic ;
 
 // Setup WiFi Client
 WiFiClient      Wifi_net;
@@ -54,7 +64,8 @@ char buffer[200];
 
 // Forward declarations
 int rssiToBars(long rssi);
-void drawWifiIcon();
+void displayQRCodeOnEPD(const char* text);
+void drawWiFiIcon(int x, int y, int bars);
 
 // Declare space for chipid and shortId
 uint64_t chipid;
@@ -63,8 +74,8 @@ char shortId[7];
 
 // callback helpers
 volatile bool mqttMsgReady = false;
-char mqttTopicBuff[128];
-char mqttPayloadBuff[256];
+char mqttTopicBuff[256];
+char mqttPayloadBuff[1024];
 
 // Declare space for secret from preferences
 String secret;
@@ -94,7 +105,7 @@ void handleMqttMessage() {
 
   if (strcmp(mqttTopicBuff, subscribeTopic) != 0) return;
 
-  StaticJsonDocument<128> doc;
+  StaticJsonDocument<1024> doc;
   DeserializationError err = deserializeJson(doc, mqttPayloadBuff);
   if (err) {
     Serial.print("MQTT JSON parse failed: ");
@@ -102,39 +113,80 @@ void handleMqttMessage() {
     return;
   }
 
-  const char* s = doc["secret"] | "";
-  if (s[0] == '\0') return;
+  // If not registered accept the reply for the secret and store
+  if (!registered) {
+    const char* s = doc["secret"] | "";
+    if (s[0] == '\0') return;
 
-  prefs.begin("secret", false);
-  prefs.putString("secret", s);
-  prefs.end();
+    prefs.begin("secret", false);
+    prefs.putString("secret", s);
+    prefs.end();
 
-  secret = s;
-  registered = true;
+    secret = s;
+    registered = true;
+    connectedScreenShown = false;
 
-  Serial.println("Registered, secret saved");
+    Serial.println("Registered, secret saved");
+    return;
+  }
+
+  // If registered, accept full range of cmds
+  const char* incomingSecret = doc["secret"] | "";
+  if (incomingSecret[0] == '\0' || secret.length() == 0) {
+    Serial.println("Rejected command: Missing secret");
+    return;
+  }
+
+  if (secret != incomingSecret) {
+    Serial.println("Rejected command: Bad secret");
+    return;
+  }
+
+  const char* cmd = doc["cmd"] | "";
+  if (cmd[0] == '\0') {
+    Serial.println("No cmd provided");
+    return;
+  }
+
+  // TODO: route by cmd
+  // if (strcmp(cmd, "led") == 0)      handleLedCommand(doc);
+  if (strcmp(cmd, "test") == 0) {
+    Serial.println("Recieved testing command");
+  }
+  // else if (strcmp(cmd, "blink") == 0) handleBlinkCommand(doc);
+  // else Serial.println("Unknown cmd");
 } 
 
 // Set up Mqtt Client 
 PubSubClient    mqttClient(mqttServer, 1883, WiFi_callback, Wifi_net);
 
-// Initial mqtt connect function
-bool mqttConnect() {
-  mqttClient.setServer(mqttServer, 1883);
-  mqttClient.setCallback(WiFi_callback);
-  while (!mqttClient.connected()) {
-    if (mqttClient.connect(wifiID, brokerName, brokerPassword)) {
-      mqttClient.subscribe(subscribeTopic);
-      Serial.print("Connected to MQTT on topic ");
-      Serial.println(SubscribeTopic);
-      mqttClient.publish(reportTopic, shortId);
-      return true;
-    } 
-    else {
-      delay(5000);
-      Serial.println("Failed to connect on MQTT");
-    }
+void mqttConnectAttempt() {
+  if (mqttClient.connected()) return;
+
+  if (millis() - lastMqttAttemptMs < 5000) return;
+  lastMqttAttemptMs = millis();
+
+  Serial.println("Attempting MQTT connect...");
+  if (mqttClient.connect(wifiID.c_str(), brokerName, brokerPassword)) {
+    mqttClient.subscribe(subscribeTopic);
+    mqttClient.subscribe(heartbeatTopic);
+    Serial.println("MQTT connected + subscribed");
+  } else {
+    Serial.println("MQTT connected failed");
   }
+}
+
+void registerAttempt() {
+  if (registered) return;
+
+  if (!mqttClient.connected()) return;
+
+  if (millis() - lastRegisterAttemptMs < 3000) return;
+  lastRegisterAttemptMs = millis();
+
+  bool ok = requestRegister();
+  Serial.print("Register Publish: ");
+  Serial.println(ok ? "ok" : "failed");
 }
 
 // Function to call once a device has wifi and mqtt connection for registering it with the organization
@@ -149,6 +201,76 @@ bool requestRegister() {
   size_t n = serializeJson(doc, out, sizeof(out));
 
   return mqttClient.publish(reportTopic, out, n);
+}
+
+void heartbeat() {
+  if (!registered) return;
+
+  if (!mqttClient.connected()) return;
+
+  if (millis() - lastHeartbeatMs < HEARTBEAT_PERIOD_MS) return;
+  lastHeartbeatMs = millis();
+
+  StaticJsonDocument<256> doc;
+  doc["secret"] = secret;
+  doc["code"] = shortId;
+  doc["uuid"] = SERVICE_UUID;
+  doc["ssid"] = WiFi.SSID().c_str();
+  doc["ip"] = WiFi.localIP().toString();
+  doc["rssi"] = WiFi.RSSI();
+
+  char out[256];
+  size_t n = serializeJson(doc, out, sizeof(out));
+
+  bool ok = mqttClient.publish(heartbeatTopic, out, n);
+  Serial.print("Heartbeat publish: ");
+  Serial.println(ok ? "ok" : "failed");
+}
+
+// WiFi setup screen
+void showWifiSetupScreen(const char* apName) {
+  EPD_FastInit();
+  EPD_Display_Clear();
+
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
+  Paint_Clear(WHITE);
+
+  // Left side
+  EPD_ShowString(10, 10,  "WIFI SETUP REQUIRED", 16, BLACK);
+  EPD_ShowString(10, 30,  "Connect to AP:", 16, BLACK);
+  EPD_ShowString(10, 50,  apName, 16, BLACK);
+  EPD_ShowString(10, 75,  "Or scan QR to open", 16, BLACK);
+  EPD_ShowString(10, 95,  "setup portal", 16, BLACK);
+  EPD_ShowString(10, 125, "URL: 192.168.4.1", 16, BLACK);
+
+  // Right side QR to portal
+  displayQRCodeOnEPD("http://192.168.4.1");
+
+  EPD_Display(ImageBW);
+  EPD_Update();
+}
+
+// Stage two screen while connecting to mqtt and getting registered
+void showRegisteringScreen() {
+  EPD_FastInit();
+  EPD_Display_Clear();
+
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
+  Paint_Clear(WHITE);
+
+  EPD_ShowString(10, 10,  "WIFI CONNECTED", 16, BLACK);
+  EPD_ShowString(10, 30,  "Registering device...", 16, BLACK);
+
+  snprintf(buffer, sizeof(buffer), "Code: %s", shortId);
+  EPD_ShowString(10, 55, buffer, 16, BLACK);
+
+  EPD_ShowString(10, 80,  "Connecting MQTT...", 16, BLACK);
+  EPD_ShowString(10, 100, "Waiting for secret", 16, BLACK);
+
+  displayQRCodeOnEPD(shortId);
+
+  EPD_Display(ImageBW);
+  EPD_Update();
 }
 
 
@@ -172,6 +294,12 @@ void setup() {
           (uint16_t)(chipid >> 32),
           (uint32_t)chipid);
  
+
+  
+  apName = "Cart Setup ";
+  apName += shortId;
+
+  // Reset settings for testing
   // wifiManager.resetSettings();
 
   FastLED.addLeds<WS2812, DATA_PIN, RGB>(leds, NUM_LEDS);
@@ -181,7 +309,7 @@ void setup() {
   EPD_Init();
 
   // Get wifi id
-  wifiID = WiFi_ID.c_str();
+  wifiID = shortId;
 
   Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
   Paint_Clear(WHITE);
@@ -201,20 +329,19 @@ void setup() {
     registered = false;
   }
 
+  // Setup the mqttClient
+  mqttClient.setServer(mqttServer, 1883);
+  mqttClient.setCallback(WiFi_callback);
+
   /////////////////// Setup MQTT topics ///////////////////////
   ReportTopic = "wh/register/" + SERVICE_UUID;
   SubscribeTopic = "wh/device/" + SERVICE_UUID;
+  HeartbeatTopic = SubscribeTopic + "/heartbeat";
 
   reportTopic = ReportTopic.c_str();
   subscribeTopic = SubscribeTopic.c_str();
+  heartbeatTopic = HeartbeatTopic.c_str();
   ////////////////////////////////////////////////////////////
-
-  // prefs.begin("secret", false);
-  // prefs.putString("chipId", SERVICE_UUID);
-  // prefs.end();
-
-  // Serial.println(id);
-  // delay(5000);
 
   // BOOT SCREEN
   EPD_ShowString(10, 10, "Connecting to WiFi...", 16, BLACK);
@@ -227,63 +354,64 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.begin();
 
-  wifiManager.setConfigPortalTimeout(5);
-
-  bool result = wifiManager.autoConnect("Cart Setup");
-  Serial.println(result);
-
-  if (result == 0) {
-    Serial.println("Showing setup screen");
-    showPortalScreen();
-  }
-
   wifiManager.setConfigPortalTimeout(180);
-  while (result == 0) {
-    result = wifiManager.autoConnect("Cart Setup");
-  }
-  
-  // If not registered, request register
-  if (!registered) {
-    if (mqttConnect()) {
-      requestRegister();
-    }
-  }
-  // If registered, show connected dashboard
-  if (registered) {
-    if (mqttConnect()) {
-      showConnectedDashboard();
+
+  // Try quick reconnect first
+  wifiManager.setConfigPortalTimeout(5);
+  bool ok = wifiManager.autoConnect(apName.c_str());
+
+  if (!ok) {
+    // Show setup screen before starting the portal to ensure display
+    showWifiSetupScreen(apName.c_str());
+
+    wifiManager.setConfigPortalTimeout(180);
+    while (!wifiManager.autoConnect(apName.c_str())) {
+      // Loop until connected
     }
   }
 }
 
 // ----------------------------------------------------
-// LOOP (FULLY NON-BLOCKING)
+// LOOP 
 // ----------------------------------------------------
 void loop() {
-  ///////////////////// WiFi reconnect on disconnect ///////////////////////////
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Lost Connection");
-    showLostConnectionScreen();
-    int result = 0;
-    for (int i = 0; i < NUM_LEDS; i++) {
-      leds[i] = CRGB::Green;
-    }
-    FastLED.show();
-    while (result == 0) {
-      result = wifiManager.autoConnect("Cart Setup");
-    }
-  }
-  /////////////////////////////////////////////////////////////////////////////
+    connectedScreenShown = false;
+    registeringScreenShown = false;
 
-  ///////////////////// Mqtt reconnect on disconnect //////////////////////////
-  if (!mqttClient.connected()) {
-    mqttConnect();
-  }
-  /////////////////////////////////////////////////////////////////////////////
+    wifiManager.setConfigPortalTimeout(5);
+    bool ok = wifiManager.autoConnect(apName.c_str());
+    if (ok) return;
 
+    showWifiSetupScreen(apName.c_str());
+
+    wifiManager.setConfigPortalTimeout(180);
+    while (!wifiManager.autoConnect(apName.c_str())) {}
+    return;
+  }
+  
   mqttClient.loop();
   handleMqttMessage();
 
+  mqttConnectAttempt();
+  heartbeat();
+
+  if (!registered) {
+    if (!registeringScreenShown) {
+      registeringScreenShown = true;
+      connectedScreenShown = false;
+      showRegisteringScreen();
+    }
+
+    registerAttempt();
+    return;
+  }
+
+  if (!connectedScreenShown) {
+    connectedScreenShown = true;
+    registeringScreenShown = false;
+    showConnectedDashboard();
+  }
 }
 
 // ----------------------------------------------------
@@ -297,7 +425,7 @@ void showConnectedDashboard() {
   Paint_Clear(WHITE);
 
   // Title
-  EPD_ShowString(10, 10, "WiFi CONNECTED", 16, BLACK);
+  EPD_ShowString(10, 10, "CONNECTED", 16, BLACK);
 
   // SSID
   snprintf(buffer, sizeof(buffer), "SSID: %s", WiFi.SSID().c_str());
@@ -317,66 +445,24 @@ void showConnectedDashboard() {
   drawWiFiIcon(10, 95, bars);   // under RSSI text
 
   // Chip ID
-  snprintf(buffer, sizeof(buffer), "ChipID: %s", chipIdStr);
+  snprintf(buffer, sizeof(buffer), "ChipID: %s", SERVICE_UUID.c_str());
   EPD_ShowString(10, 140, buffer, 16, BLACK);
 
   // QR Code (right side)
-  displayQRCodeOnEPD(chipIdStr);
+  displayQRCodeOnEPD(SERVICE_UUID.c_str());
 
   EPD_Display(ImageBW);
   EPD_Update();
   EPD_DeepSleep();
 }
 
-
-
-// ----------------------------------------------------
-// PORTAL SCREEN
-// ----------------------------------------------------
-void showPortalScreen() {
-  EPD_FastInit();
-  EPD_Display_Clear();
-
-  Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);  // Create a new white background image.
-  Paint_Clear(WHITE);  // Clear the canvas.
-
-  EPD_ShowString(10, 10, "WIFI SETUP REQUIRED", 16, BLACK);
-  EPD_ShowString(10, 30, "Connect to WiFi:", 16, BLACK);
-  EPD_ShowString(10, 50, "Cart Setup", 16, BLACK);
-
-  EPD_Display(ImageBW);
-  EPD_Update();
-}
-
-// ----------------------------------------------------
-// LOST CONNETION SCREEN
-// ----------------------------------------------------
-void showLostConnectionScreen() {
-  EPD_FastInit();
-  EPD_Display_Clear();
-
-  Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);  // Create a new white background image.
-  Paint_Clear(WHITE);  // Clear the canvas.
-
-  EPD_ShowString(10, 10, "WIFI CONNECTION LOST", 16, BLACK);
-  EPD_ShowString(10, 30, "Reconfigure WiFi at AP:", 16, BLACK);
-  EPD_ShowString(10, 50, "Cart Setup", 16, BLACK);
-
-  EPD_Display(ImageBW);
-  EPD_Update();
-}
-
 // ----------------------------------------------------
 // QR CODE
 // ----------------------------------------------------
 void displayQRCodeOnEPD(const char* text) {
-  // Build "ptl-" + original text
-  char qrText[64];
-  snprintf(qrText, sizeof(qrText), "ptl-%s", text);
-
   QRCode qrcode;
   uint8_t qrcodeData[qrcode_getBufferSize(4)];
-  qrcode_initText(&qrcode, qrcodeData, 4, 0, qrText);  // ✅ use qrText now
+  qrcode_initText(&qrcode, qrcodeData, 4, 0, text);
 
   const int scale = 5;
   int qrPixSize = qrcode.size * scale;
@@ -398,6 +484,7 @@ void displayQRCodeOnEPD(const char* text) {
     }
   }
 }
+
 
 // ----------------------------------------------------
 // RSSI → SIGNAL BARS
