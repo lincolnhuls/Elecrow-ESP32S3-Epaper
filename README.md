@@ -74,7 +74,7 @@ Use the following **exact** settings in the Arduino IDE or PlatformIO:
   "g":yourGreen,
   "b":yourBLue,
   "duration":durationInSecondsFromHighToLow,
-  "brightness":yourBrightnessToStartFrom,
+  "brightness":yourMaxBrightness,
   "start":firstPixelLedIndex,
   "count":howManyLedsInPixel
 }
