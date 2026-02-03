@@ -64,3 +64,19 @@ Use the following **exact** settings in the Arduino IDE or PlatformIO:
 }
 ```
 
+- **Breathe**
+- Defaults to white, breathing a full cycle every second until off command is received
+```json
+{
+  "secret":"yourSecret",
+  "cmd":"breathe",
+  "r":yourRed,
+  "g":yourGreen,
+  "b":yourBLue,
+  "duration":durationInMsFromHighToLow,
+  "brightness":yourBrightnessToStartFrom,
+  "start":firstPixelLedIndex,
+  "count":howManyLedsInPixel
+}
+```
+
