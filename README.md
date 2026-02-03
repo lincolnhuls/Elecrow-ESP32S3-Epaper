@@ -24,8 +24,8 @@ Use the following **exact** settings in the Arduino IDE or PlatformIO:
 - **JSON**
 ```json
 {
-  "secret": yourSecret,
-  "cmd":yourLedCommand,
+  "secret": "yourSecret",
+  "cmd":"yourLedCommand",
   "red":yourRed,
   "green":yourGreen,
   "blue":yourBlue,
