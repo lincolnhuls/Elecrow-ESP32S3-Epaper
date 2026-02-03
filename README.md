@@ -19,7 +19,7 @@ Use the following **exact** settings in the Arduino IDE or PlatformIO:
 
 ---
 
-### Reseting the Board
+### Resetting the Board
 
 To remove the device from its current adoption in the software use the following command
 ```json
