@@ -29,10 +29,12 @@ To remove the device from its current adoption in the software use the following
 }
 ```
 
+---
+
 ### Using the LEDs
 
 - **On**
-  - Defaults to white staying on until off command is received
+  > Defaults to white staying on until off command is received
 ```json
 {
   "secret": "yourSecret",
@@ -48,7 +50,7 @@ To remove the device from its current adoption in the software use the following
 ```
 
 - **Breathe**
-  - Defaults to white, breathing a full cycle every second until off command is received
+  > Defaults to white, breathing a full cycle every second until off command is received
 ```json
 {
   "secret":"yourSecret",
@@ -64,7 +66,7 @@ To remove the device from its current adoption in the software use the following
 ```
 
 - **Blink**
-  - Defaults to white, blinking every 500ms until off command is received
+  > Defaults to white, blinking every 500ms until off command is received
 ```json
 {
   "secret":"yourSecret",
