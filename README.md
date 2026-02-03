@@ -25,7 +25,7 @@ To remove the device from its current adoption in the software use the following
 ```json
 {
   "secret":"yourSecret",
-  "cmd":"deregister"
+  "cmd":"remove"
 }
 ```
 
