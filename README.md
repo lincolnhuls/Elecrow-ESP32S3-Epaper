@@ -5,6 +5,8 @@
 - This code **only works with the 3.7-inch e-paper display**.
 
 ---
+### In the PubSub library, the PubSubClient.h file has a hardcoded buffer that needs to be expanded, 5000 should work
+---
 
 ### 🔧 Board & Flash Configuration
 
