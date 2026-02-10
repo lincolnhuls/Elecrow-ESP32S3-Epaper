@@ -647,17 +647,18 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.begin();
 
-  wifiManager.setConfigPortalTimeout(180);
-
-  // Try quick reconnect first
-  wifiManager.setConfigPortalTimeout(5);
+  // 10 seconds for trying to connected to a saved network
+  wifiManager.setConnectTimeout(10);
+  wifiManager.setEnableConfigPortal(false);
   bool ok = wifiManager.autoConnect(apName.c_str());
 
   if (!ok) {
     // Show setup screen before starting the portal to ensure display
     showWifiSetupScreen(apName.c_str());
 
+    wifiManager.setEnableConfigPortal(true);
     wifiManager.setConfigPortalTimeout(180);
+
     while (!wifiManager.autoConnect(apName.c_str())) {
       // Loop until connected
     }
