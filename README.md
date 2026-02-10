@@ -38,51 +38,48 @@ To remove the device from its current adoption in the software use the following
 ### Using the LEDs
 
 - **On**
-  > Defaults to white staying on until off command is received
+  > Defaults to white staying on until off command is received. Duration -1 means on until cmd off or new command, set to an int for an auto shut off after that many seconds
 ```json
 {
   "secret": "yourSecret",
-  "cmd":"on",
-  "red":yourRed,
-  "green":yourGreen,
-  "blue":yourBlue,
-  "duration":yourDurationInSeconds,
-  "brightness":yourBrightness,
-  "start":firstPixelLedIndex,
-  "count":howManyLedsInPixel
+  "cmd": "on",
+  "r": 255,
+  "g": 255,
+  "b": 255,
+  "duration": -1,
+  "brightness": 255,
+  "ledList": [[0,10]]
 }
 ```
 
 - **Breathe**
-  > Defaults to white, breathing a full cycle every second until off command is received
+  > Defaults to white, breathing a full cycle every second until off command is received. Duration refers to the length in second from high to low.
 ```json
 {
-  "secret":"yourSecret",
-  "cmd":"breathe",
-  "r":yourRed,
-  "g":yourGreen,
-  "b":yourBLue,
-  "duration":durationInSecondsFromHighToLow,
-  "brightness":yourMaxBrightness,
-  "start":firstPixelLedIndex,
-  "count":howManyLedsInPixel
+  "secret": "yourSecret",
+  "cmd": "breathe",
+  "r": 255,
+  "g": 255,
+  "b": 255,
+  "duration": 1, 
+  "brightness": 255,
+  "ledList": [[10,5],[30,10]]
 }
 ```
 
 - **Blink**
-  > Defaults to white, blinking every 500ms until off command is received
+  > Defaults to white, blinking every 500ms until off command is receive. If times is set to 0, it will blink until cmd off or new command. Set it to an int for an auto shut off after that many blinks.
 ```json
 {
-  "secret":"yourSecret",
-  "cmd":"blink",
-  "r":yourRed,
-  "g":yourGreen,
-  "b":yourBLue,
-  "interval":blinkIntervalInMs,
-  "times":numberOfBlinks,
-  "brightness":yourBrightness,
-  "start":firstPixelLedIndex,
-  "count":howManyLedsInPixel
+  "secret": "yourSecret",
+  "cmd": "blink",
+  "r": 255,
+  "g": 255,
+  "b": 255,
+  "interval": 500,
+  "times": 0,
+  "brightness": 255,
+  "ledList": [[1,1],[5,3]]
 }
 ```
 
@@ -90,9 +87,8 @@ To remove the device from its current adoption in the software use the following
 ```json
 {
   "secret": "yourSecret",
-  "cmd":"off",
-  "start":firstPixelLedIndex,
-  "count":howManyLedsInPixel
+  "cmd": "off",
+  "ledList": [[0,10]]
 }
 ```
 
