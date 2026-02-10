@@ -113,6 +113,7 @@ char mqttPayloadBuff[1024];
 
 // Declare space for secret from preferences
 String secret;
+String deviceName;
 
 ///////////////// MQTT Broker Setup //////////////////////////
 const char* mqttServer = "mqttbroker.tetontechnology.com";        
@@ -299,13 +300,20 @@ void handleMqttMessage() {
   // If not registered accept the reply for the secret and store
   if (!registered) {
     const char* s = doc["secret"] | "";
+    const char* dN = doc["deviceName"] | "";
     if (s[0] == '\0') return;
+    if (dN[0] == '\0') return;
 
     prefs.begin("secret", false);
     prefs.putString("secret", s);
     prefs.end();
 
+    prefs.begin("deviceName", false);
+    prefs.putString("deviceName", dN);
+    prefs.end();
+
     secret = s;
+    deviceName = dN;
     registered = true;
     connectedScreenShown = false;
 
@@ -331,8 +339,8 @@ void handleMqttMessage() {
     return;
   }
 
-  if (strcmp(cmd, "deregister") == 0) {
-    deregister();
+  if (strcmp(cmd, "remove") == 0) {
+    remove();
     return;
   }
 
@@ -418,8 +426,8 @@ void mqttConnectAttempt() {
     Serial.println("MQTT connected failed");
   }
 }
-void deregister() {
-  Serial.println("Deregister command recieved");
+void remove() {
+  Serial.println("Remove command recieved");
 
   prefs.begin("secret", false);
   prefs.remove("secret");
@@ -525,7 +533,7 @@ void showRegisteringScreen() {
   EPD_ShowString(10, 30,  "Registering device...", 16, BLACK);
 
   snprintf(buffer, sizeof(buffer), "Code: %s", shortId);
-  EPD_ShowString(10, 55, buffer, 16, BLACK);
+  EPD_ShowString(10, 55, buffer, 24, BLACK);
 
   EPD_ShowString(10, 80,  "Connecting MQTT...", 16, BLACK);
   EPD_ShowString(10, 100, "Waiting for secret", 16, BLACK);
@@ -581,6 +589,10 @@ void setup() {
   // Ready from prefs to find if a secret key is stored
   prefs.begin("secret", true);
   secret = prefs.getString("secret", "");
+  prefs.end();
+
+  prefs.begin("deviceName", true);
+  deviceName = prefs.getString("deviceName", "");
   prefs.end();
 
   // If the secret is not empty then we know that the device has been registered
@@ -709,13 +721,9 @@ void showConnectedDashboard() {
   int bars = rssiToBars(rssi);
   drawWiFiIcon(10, 95, bars);   // under RSSI text
 
-  // Chip ID
-  snprintf(buffer, sizeof(buffer), "ChipID: %s", SERVICE_UUID.c_str());
-  EPD_ShowString(10, 140, buffer, 16, BLACK);
+  snprintf(buffer, sizeof(buffer), "Device name: %s", deviceName.c_str());
+  EPD_ShowString(10, 135, buffer, 16, BLACK);
 
-  // Short Id
-  snprintf(buffer, sizeof(buffer), "Code: %s", shortId);
-  EPD_ShowString(10, 160, buffer, 24, BLACK);
 
   // QR Code (right side)
   displayQRCodeOnEPD(SERVICE_UUID.c_str());
