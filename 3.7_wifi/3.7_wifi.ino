@@ -264,7 +264,6 @@ void ledTick() {
 void stopLedEffects() {
   blinkActive = false;
   breatheActive = false;
-  // (future effects go here)
 }
 ///////////////////////////////////////////////////////////////////////////////////////////
 
@@ -297,18 +296,38 @@ void handleMqttMessage() {
     return;
   }
 
-  // If not registered accept the reply for the secret and store
+  // Debug: print received JSON
+  String output;
+  serializeJson(doc, output);
+  Serial.println(output);
+
+  // ------------------------------------------------------------
+  // NOT REGISTERED: expect adoption_complete event (not "cmd")
+  // ------------------------------------------------------------
   if (!registered) {
-    const char* s = doc["secret"] | "";
+    const char* event = doc["event"] | "";
+
+    // Only accept adoption_complete while unregistered
+    if (strcmp(event, "adoption_complete") != 0) {
+      Serial.print("Ignoring message while unregistered; event=");
+      Serial.println(event);
+      return;
+    }
+
+    const char* s  = doc["secret"] | "";
     const char* dN = doc["deviceName"] | "";
-    if (s[0] == '\0') return;
-    if (dN[0] == '\0') return;
 
-    prefs.begin("secret", false);
+    if (s[0] == '\0') {
+      Serial.println("adoption_complete missing secret");
+      return;
+    }
+    if (dN[0] == '\0') {
+      Serial.println("adoption_complete missing deviceName");
+      return;
+    }
+
+    prefs.begin("reg", false);
     prefs.putString("secret", s);
-    prefs.end();
-
-    prefs.begin("deviceName", false);
     prefs.putString("deviceName", dN);
     prefs.end();
 
@@ -316,12 +335,15 @@ void handleMqttMessage() {
     deviceName = dN;
     registered = true;
     connectedScreenShown = false;
+    registeringScreenShown = false;
 
-    Serial.println("Registered, secret saved");
+    Serial.println("Adoption complete: secret + deviceName saved");
     return;
   }
 
-  // If registered, accept full range of cmds
+  // ------------------------------------------------------------
+  // REGISTERED: accept normal cmds (remove/on/blink/breathe/off)
+  // ------------------------------------------------------------
   const char* incomingSecret = doc["secret"] | "";
   if (incomingSecret[0] == '\0' || secret.length() == 0) {
     Serial.println("Rejected command: Missing secret");
@@ -366,15 +388,14 @@ void handleMqttMessage() {
     uint8_t g = doc["g"] | 255;
     uint8_t b = doc["b"] | 255;
 
-    uint16_t interval_ms = doc["interval"] | 500;   
-    uint8_t times = doc["times"] | 0;              
+    uint16_t interval_ms = doc["interval"] | 500;
+    uint8_t times = doc["times"] | 0;
 
     uint8_t brightness = doc["brightness"] | 255;
     uint16_t start = doc["start"] | 0;
     uint16_t count = doc["count"] | NUM_LEDS;
 
     blink(r, g, b, interval_ms, times, brightness, start, count);
-          
     return;
   }
 
@@ -384,7 +405,7 @@ void handleMqttMessage() {
     uint8_t g = doc["g"] | 255;
     uint8_t b = doc["b"] | 255;
 
-    int16_t duration_s = doc["duration"] | 1;   // HALF cycle seconds
+    int16_t duration_s = doc["duration"] | 1; // half-cycle seconds
     uint8_t brightness = doc["brightness"] | 255;
 
     uint16_t start = doc["start"] | 0;
@@ -396,17 +417,17 @@ void handleMqttMessage() {
 
   if (strcmp(cmd, "off") == 0) {
     stopLedEffects();
-    blinkActive = false;
     uint16_t start = doc["start"] | 0;
     uint16_t count = doc["count"] | NUM_LEDS;
 
     off(start, count);
     Serial.println("Executed OFF command");
+    return;
   }
 
   Serial.print("Unknown cmd: ");
   Serial.println(cmd);
-} 
+}
 
 // Set up Mqtt Client 
 PubSubClient    mqttClient(mqttServer, 1883, WiFi_callback, Wifi_net);
@@ -429,17 +450,20 @@ void mqttConnectAttempt() {
 void remove() {
   Serial.println("Remove command recieved");
 
-  prefs.begin("secret", false);
+  prefs.begin("reg", false);
   prefs.remove("secret");
+  prefs.remove("deviceName");
   prefs.end();
 
   secret = "";
+  deviceName = "";
   registered = false;
-
   connectedScreenShown = false;
   registeringScreenShown = false;
 
   mqttClient.disconnect();
+  lastMqttAttemptMs = 0;
+  lastRegisterAttemptMs = 0;
 
   showRegisteringScreen();
 }
@@ -565,8 +589,6 @@ void setup() {
           (uint16_t)(chipid >> 32),
           (uint32_t)chipid);
  
-
-  
   apName = "Cart Setup ";
   apName += shortId;
 
@@ -587,22 +609,18 @@ void setup() {
   
   // True means that namespace can be read but not written to, false is read and write
   // Ready from prefs to find if a secret key is stored
-  prefs.begin("secret", true);
+  prefs.begin("reg", true);
   secret = prefs.getString("secret", "");
-  prefs.end();
-
-  prefs.begin("deviceName", true);
   deviceName = prefs.getString("deviceName", "");
   prefs.end();
 
-  // If the secret is not empty then we know that the device has been registered
-  if (secret != "") {
-    registered = true;
-  } 
-  // If not we need to go through the register process
-  else {
-    registered = false;
-  }
+  Serial.print("Device Secret: ");
+  Serial.println(secret);
+  Serial.print("Device Name: ");
+  Serial.println(deviceName);
+
+  // Verify that we have a secret for registration
+  registered = (secret.length() > 0);
 
   // Setup the mqttClient
   mqttClient.setServer(mqttServer, 1883);
