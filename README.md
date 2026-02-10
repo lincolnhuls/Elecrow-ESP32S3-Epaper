@@ -18,6 +18,8 @@ Use the following **exact** settings in the Arduino IDE or PlatformIO:
   > ⚠️ Upload will fail if this is not set correctly
 
 ---
+### All device commands must be sent on wh/device/device-uuid
+---
 
 ### Resetting the Board
 
