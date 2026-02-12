@@ -91,6 +91,14 @@ To remove the device from its current adoption in the software use the following
   "ledList": [[0,10]]
 }
 ```
+Off also has an optional argument, "all", which when sent with the flag true acts as a global off, turning all leds off, no longer requiring a range
+```json
+{
+  "secret": "yourSecret".
+  "cmd": "off",
+  "all": true
+}
+```
 
 
 
