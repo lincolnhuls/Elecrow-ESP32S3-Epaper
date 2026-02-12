@@ -24,6 +24,9 @@
 WiFiManager wifiManager;
 Preferences prefs;
 
+#define MAX_SLOTS 8
+#define MAX_RANGES 16
+
 // Flag for register state
 bool registered = false;
 bool registeringScreenShown = false;
@@ -33,6 +36,7 @@ bool connectedScreenShown = false;
 bool ledsActive = false;
 uint32_t ledsOffAtMs = 0;
 uint8_t lastBrightness = 255;
+volatile bool forceLedRender = false;
 
 // Blink Aids
 bool blinkActive = false;
@@ -124,148 +128,432 @@ const char* brokerPassword = "N3tJPFTHYYNcsHw";
 
 ////////////////////////////////////// Led Functions //////////////////////////////////////
 
-void on(uint8_t red=255, uint8_t green=255, uint8_t blue=255, uint16_t duration_s=-1, uint8_t brightness=255, uint16_t start_index=0, uint16_t indexCount=1) {
-  lastBrightness = brightness;
-  FastLED.setBrightness(brightness);
+// Slot creation so multiple areas on the cart can be on and updated at the same time
+struct LedRange {
+  uint16_t start;
+  uint16_t count;
+};
 
-  for (int i = 0; i < indexCount && (start_index + i) < NUM_LEDS; i++) {
-    int idx = start_index + i;
-    leds[idx].setRGB(red, green, blue); 
+enum EffectType : uint8_t {
+  EFFECT_NONE = 0,
+  EFFECT_ON,
+  EFFECT_BLINK,
+  EFFECT_BREATHE,
+  EFFECT_MASK_OFF
+};
+
+struct LedSlot {
+  bool active = false;
+  EffectType type = EFFECT_NONE;
+
+  // Color and intensity caps
+  uint8_t r = 255, g = 255, b = 255;
+  uint8_t maxBrightness = 255;
+
+  // Ranges owned by slot
+  LedRange ranges[MAX_RANGES];
+  uint8_t rangeCount = 0;
+
+  uint32_t lastFrameMs = 0;
+
+  // ON
+  uint32_t offAtMs = 0;
+
+  // BLINK
+  bool blinkIsOn = false;
+  uint16_t blinkIntervalMs = 500;
+  uint16_t blinkRemainingToggles = 0;
+  uint32_t blinkNextToggleMs = 0;
+
+  // BREATHE
+  uint16_t phase16 = 0;
+  uint16_t phaseStep = 1;
+};
+
+LedSlot slots[MAX_SLOTS];
+
+uint32_t ledsLastFrameMs = 0;
+const uint16_t LED_FRAME_MS = 15;
+
+// Range helpers for the slots
+static inline uint32_t rangeEnd(const LedRange& r) {
+  return (uint32_t)r.start + (uint32_t)r.count; // exclusive end
+}
+
+static bool rangesOverlap(const LedRange& a, const LedRange& b) {
+  uint32_t a0 = a.start, a1 = rangeEnd(a);
+  uint32_t b0 = b.start, b1 = rangeEnd(b);
+  return (a0 < b1) && (b0 < a1);
+}
+
+static bool slotOverlapsList(const LedSlot& s, const LedRange* list, uint8_t listCount) {
+  uint8_t sN = s.rangeCount;
+  if (sN > MAX_RANGES) sN = MAX_RANGES;
+  if (listCount > MAX_RANGES) listCount = MAX_RANGES;
+
+  for (uint8_t i = 0; i < sN; i++) {
+    for (uint8_t j = 0; j < listCount; j++) {
+      if (rangesOverlap(s.ranges[i], list[j])) return true;
+    }
   }
-  FastLED.show();
+  return false;
+}
 
-  ledsActive = true;
+// ---------------------- Slot lifecycle ----------------------
 
-  if (duration_s < 0) {
-    ledsOffAtMs = 0;
-  } else {
-    ledsOffAtMs = millis() + (uint32_t)duration_s * 1000UL;
+static void clearSlot(uint8_t i) {
+  if (i >= MAX_SLOTS) return;
+  slots[i].active = false;
+  slots[i].type = EFFECT_NONE;
+  slots[i].rangeCount = 0;
+
+  slots[i].offAtMs = 0;
+
+  slots[i].blinkIsOn = false;
+  slots[i].blinkIntervalMs = 500;
+  slots[i].blinkRemainingToggles = 0;
+  slots[i].blinkNextToggleMs = 0;
+
+  slots[i].phase16 = 0;
+  slots[i].phaseStep = 1;
+}
+
+// Find an available slot; if none, reuse slot 0 (simple + cheap)
+static int8_t allocSlot() {
+  for (uint8_t i = 0; i < MAX_SLOTS; i++) {
+    if (!slots[i].active) return (int8_t)i;
+  }
+  return 0;
+}
+
+// "Last command wins" for overlaps:
+// clear any existing slot whose ranges overlap the incoming list.
+static void cancelOverlappingSlots(const LedRange* list, uint8_t listCount) {
+  if (!list || listCount == 0) return;
+  if (listCount > MAX_RANGES) listCount = MAX_RANGES;
+
+  for (uint8_t i = 0; i < MAX_SLOTS; i++) {
+    if (!slots[i].active) continue;
+
+    uint8_t sN = slots[i].rangeCount;
+    if (sN > MAX_RANGES) sN = MAX_RANGES;
+
+    if (rangesOverlap(slots[i].ranges, sN, list, listCount)) {
+      clearSlot(i);
+    }
   }
 }
 
-void blink(uint8_t red=255, uint8_t green=255, uint8_t blue=255, uint16_t interval_ms=500, uint8_t times=0, uint8_t brightness=255, uint16_t start_index=0, uint16_t indexCount=1) {
-  blinkR = red;
-  blinkG = green;
-  blinkB = blue;
-  blinkBrightness = brightness;
-  blinkStart = start_index;
-  blinkCount = indexCount;
+// ---------------------- LED write helpers ----------------------
 
-  blinkIntervalMs = interval_ms;
-  blinkRemaining = (times == 0) ? 0 : times * 2;
-
-  blinkIsOn = false;
-  blinkActive = true;
-  blinkNextToggleMs = millis();
+static inline uint8_t scale8u(uint8_t v, uint8_t scale) {
+  // FastLED has scale8(), but keeping local avoids extra includes/assumptions.
+  return (uint8_t)(((uint16_t)v * (uint16_t)scale) / 255u);
 }
 
-void breathe(uint8_t red=255, uint8_t green=255, uint8_t blue=255, uint16_t duration_s=1, 
-uint8_t brightness=255, uint16_t start_index=0, uint16_t indexCount=1) {
+// Writes a solid color into leds[] for a single range (no FastLED.show here)
+static void fillRangeRGB(uint16_t start, uint16_t count, uint8_t r, uint8_t g, uint8_t b) {
+  uint32_t end = (uint32_t)start + (uint32_t)count;
+  if (start >= NUM_LEDS) return;
+  if (end > NUM_LEDS) end = NUM_LEDS;
 
-  breatheR = red;
-  breatheG = green;
-  breatheB = blue;
+  for (uint32_t i = start; i < end; i++) {
+    leds[i].setRGB(r, g, b);
+  }
+}
 
-  breatheMaxBrightness = brightness;
-  breatheStart = start_index;
-  breatheCount = indexCount;
+// helper: copy ranges into slot (clamps to MAX_RANGES)
+static void copyRangesToSlot(LedSlot& s, const LedRange* ranges, uint8_t n) {
+  if (n > MAX_RANGES) n = MAX_RANGES;
+  s.rangeCount = n;
+  for (uint8_t i = 0; i < n; i++) s.ranges[i] = ranges[i];
+}
 
-  breatheHalfPeriodMs = (uint32_t)duration_s * 1000UL;
+void on(uint8_t red, uint8_t green, uint8_t blue,
+        int16_t duration_s,
+        uint8_t brightness,
+        const LedRange* ranges,
+        uint8_t n) {
+  if (!ranges || n == 0) return;
 
-  uint32_t cycleMs = breatheHalfPeriodMs * 2UL;
+  cancelOverlappingSlots(ranges, n);
+  int8_t idx = allocateSlotFor(ranges, n);
+  clearSlot(idx);
+
+  LedSlot& s = slots[idx];
+  s.active = true;
+  s.type = EFFECT_ON;
+
+  s.r = red; s.g = green; s.b = blue;
+  s.maxBrightness = brightness;
+
+  copyRangesToSlot(s, ranges, n);
+
+  s.offAtMs = (duration_s < 0) ? 0 : (millis() + (uint32_t)duration_s * 1000UL);
+
+  // initialize timing fields so ledTick updates cleanly
+  s.lastFrameMs = millis();
+  s.blinkNextToggleMs = 0;
+}
+
+void blink(uint8_t red, uint8_t green, uint8_t blue,
+           uint16_t interval_ms,
+           uint8_t times,
+           uint8_t brightness,
+           const LedRange* ranges,
+           uint8_t n) {
+  if (!ranges || n == 0) return;
+
+  cancelOverlappingSlots(ranges, n);
+  int8_t idx = allocateSlotFor(ranges, n);
+  clearSlot(idx);
+
+  LedSlot& s = slots[idx];
+  s.active = true;
+  s.type = EFFECT_BLINK;
+
+  s.r = red; s.g = green; s.b = blue;
+  s.maxBrightness = brightness;
+
+  copyRangesToSlot(s, ranges, n);
+
+  s.blinkIntervalMs = interval_ms;
+  s.blinkIsOn = false;
+  s.blinkNextToggleMs = millis();                 // toggle immediately on next tick
+  s.blinkRemainingToggles = (times == 0) ? 0 : (uint16_t)times * 2;
+
+  s.offAtMs = 0;
+  s.lastFrameMs = millis();
+}
+
+void breathe(uint8_t red, uint8_t green, uint8_t blue,
+             int16_t duration_s,   // HALF cycle seconds (same meaning as before)
+             uint8_t brightness,
+             const LedRange* ranges,
+             uint8_t n) {
+  if (!ranges || n == 0) return;
+
+  cancelOverlappingSlots(ranges, n);
+  int8_t idx = allocateSlotFor(ranges, n);
+  clearSlot(idx);
+
+  uint32_t halfMs  = (uint32_t)max<int16_t>(1, duration_s) * 1000UL;
+  uint32_t cycleMs = halfMs * 2UL;
   if (cycleMs == 0) cycleMs = 1;
 
-  breathePhaseStep = (uint16_t)((65536UL * BREATHE_FRAME_MS) / cycleMs);
-  if (breathePhaseStep == 0) breathePhaseStep = 1;
+  LedSlot& s = slots[idx];
+  s.active = true;
+  s.type = EFFECT_BREATHE;
 
-  breathePhase16 = (uint16_t)(64 << 8); // sin8(64) ~= 255 (start bright)
-  breatheLastFrameMs = millis();
-  lastBreatheBrightness = 255; // ok to keep, but optional
+  s.r = red; s.g = green; s.b = blue;
+  s.maxBrightness = brightness;
 
-  breatheActive = true;
+  copyRangesToSlot(s, ranges, n);
 
-  // paint pixels once; ledTick modulates brightness
-  on(breatheR, breatheG, breatheB, -1, breatheMaxBrightness, breatheStart, breatheCount);
+  s.phaseStep = (uint16_t)((65536UL * BREATHE_FRAME_MS) / cycleMs);
+  if (s.phaseStep == 0) s.phaseStep = 1;
+
+  s.phase16 = (uint16_t)(64 << 8);                // start bright
+  s.lastFrameMs = millis();
+
+  s.offAtMs = 0;
 }
 
-void off(uint16_t start_index = 0, uint16_t count = NUM_LEDS) {
-  for (uint16_t i = start_index; i < start_index + count && i < NUM_LEDS; i++) {
-    leds[i] = CRGB::Black;
+void stopLedEffects() {
+  for (uint8_t i = 0; i < MAX_SLOTS; i++) clearSlot(i);
+}
+
+
+// ---------------------- Slot state update ----------------------
+
+static bool updateSlotState(LedSlot& s, uint32_t now) {
+  // returns true if anything about the slot changed (so we should re-render)
+  if (!s.active) return false;
+
+  // 1) timed ON: expire
+  if (s.type == EFFECT_ON && s.offAtMs != 0 && (int32_t)(now - s.offAtMs) >= 0) {
+    s.active = false;
+    return true;
   }
-  FastLED.show();
 
-  ledsActive = false;   
-  ledsOffAtMs = 0;     
+  // 2) blink: toggle on schedule
+  if (s.type == EFFECT_BLINK) {
+    if ((int32_t)(now - s.blinkNextToggleMs) >= 0) {
+      s.blinkNextToggleMs = now + s.blinkIntervalMs;
+      s.blinkIsOn = !s.blinkIsOn;
+
+      if (s.blinkRemainingToggles > 0) {
+        s.blinkRemainingToggles--;
+        if (s.blinkRemainingToggles == 0) {
+          s.active = false; // done blinking
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  // 3) breathe: advance phase on frame cadence
+  if (s.type == EFFECT_BREATHE) {
+    uint32_t elapsed = now - s.lastFrameMs;
+    if (elapsed < BREATHE_FRAME_MS) return false;
+
+    uint32_t frames = elapsed / BREATHE_FRAME_MS;
+    if (frames > 3) frames = 3;          // cap catch-up
+    s.lastFrameMs += frames * BREATHE_FRAME_MS;
+    s.phase16 += (uint16_t)(frames * s.phaseStep);
+    return true;
+  }
+
+  return false;
 }
 
+// Convert slot -> brightness scale 0..255
+static uint8_t slotLevel(const LedSlot& s) {
+  if (!s.active) return 0;
 
-// Helper for non-blocking
+  if (s.type == EFFECT_ON) {
+    return s.maxBrightness; // constant
+  }
+
+  if (s.type == EFFECT_BLINK) {
+    return s.blinkIsOn ? s.maxBrightness : 0;
+  }
+
+  if (s.type == EFFECT_BREATHE) {
+    uint8_t phase8 = (uint8_t)(s.phase16 >> 8);
+    uint8_t wave = sin8(phase8); // 0..255..0
+    return (uint8_t)((uint32_t)s.maxBrightness * wave / 255UL);
+  }
+
+  return 0;
+}
+
+// ---------------------- Multi-slot tick + single show ----------------------
+
 void ledTick() {
   uint32_t now = millis();
 
-  // 1) Blink scheduler (highest priority)
-  if (blinkActive && (int32_t)(now - blinkNextToggleMs) >= 0) {
-    blinkNextToggleMs = now + blinkIntervalMs;
+  bool anyActive = false;
+  bool needRender = forceLedRender;
 
-    if (blinkIsOn) {
-      off(blinkStart, blinkCount);
-    } else {
-      on(blinkR, blinkG, blinkB,
-         -1,               // blink controls timing
-         blinkBrightness,
-         blinkStart,
-         blinkCount);
+  // Update slot state machines
+  for (uint8_t i = 0; i < MAX_SLOTS; i++) {
+    if (!slots[i].active) continue;
+    anyActive = true;
+
+    if (updateSlotState(slots[i], now)) {
+      needRender = true;
     }
-
-    blinkIsOn = !blinkIsOn;
-
-    if (blinkRemaining > 0) {
-      blinkRemaining--;
-      if (blinkRemaining == 0) {
-        blinkActive = false;
-        off(blinkStart, blinkCount);
-      }
-    }
-    return; // prevent other schedulers from fighting this cycle
   }
 
-  // 2) Breathe scheduler (next priority)
-  if (breatheActive) {
-    uint32_t elapsed = now - breatheLastFrameMs;
-    if (elapsed < BREATHE_FRAME_MS) return;
-
-    // number of frames to advance; cap catch-up to prevent jumps
-    uint32_t frames = elapsed / BREATHE_FRAME_MS;
-    if (frames > 3) frames = 3;
-
-    breatheLastFrameMs += frames * BREATHE_FRAME_MS;
-    breathePhase16 += (uint16_t)(frames * breathePhaseStep);
-
-    // use high byte as 0..255 phase for sin8
-    uint8_t phase8 = (uint8_t)(breathePhase16 >> 8);
-    uint8_t wave = sin8(phase8); // smooth 0..255..0..255
-
-    uint8_t curBrightness = (uint8_t)((uint32_t)breatheMaxBrightness * wave / 255UL);
-
-    if (curBrightness != lastBreatheBrightness) {
-      lastBreatheBrightness = curBrightness;
-      FastLED.setBrightness(curBrightness);
+  // If nothing is active, we may still need to clear the strip
+  if (!anyActive) {
+    if (needRender) {
+      FastLED.clear();
       FastLED.show();
+      forceLedRender = false;
     }
     return;
   }
 
-  // 3) Auto-off scheduler (for plain on(duration))
-  if (ledsActive && ledsOffAtMs != 0 && (int32_t)(now - ledsOffAtMs) >= 0) {
-    off();
-  }
-}
+  // If nothing changed and no forced render, skip
+  if (!needRender) return;
 
-void stopLedEffects() {
-  blinkActive = false;
-  breatheActive = false;
+  // Rebuild the LED buffer from all active (non-mask) slots
+  for (uint16_t i = 0; i < NUM_LEDS; i++) {
+    leds[i] = CRGB::Black;
+  }
+
+  // 1) Render normal effects first (ON/BLINK/BREATHE)
+  for (uint8_t i = 0; i < MAX_SLOTS; i++) {
+    const LedSlot& s = slots[i];
+    if (!s.active) continue;
+    if (s.type == EFFECT_MASK_OFF) continue; // <-- skip masks for now
+
+    uint8_t level = slotLevel(s);
+    if (level == 0) continue;
+
+    uint8_t rr = scale8u(s.r, level);
+    uint8_t gg = scale8u(s.g, level);
+    uint8_t bb = scale8u(s.b, level);
+
+    uint8_t n = s.rangeCount;
+    if (n > MAX_RANGES) n = MAX_RANGES;
+
+    for (uint8_t k = 0; k < n; k++) {
+      fillRangeRGB(s.ranges[k].start, s.ranges[k].count, rr, gg, bb);
+    }
+  }
+
+  // 2) Apply OFF masks last (force black in those ranges)
+  for (uint8_t i = 0; i < MAX_SLOTS; i++) {
+    const LedSlot& s = slots[i];
+    if (!s.active) continue;
+    if (s.type != EFFECT_MASK_OFF) continue;
+
+    uint8_t n = s.rangeCount;
+    if (n > MAX_RANGES) n = MAX_RANGES;
+
+    for (uint8_t k = 0; k < n; k++) {
+      fillRangeRGB(s.ranges[k].start, s.ranges[k].count, 0, 0, 0);
+    }
+  }
+
+  FastLED.show();
+  forceLedRender = false;
 }
 ///////////////////////////////////////////////////////////////////////////////////////////
+
+// -------- ledList parsing + overlap helpers --------
+
+static uint8_t parseLedList(JsonArray list, LedRange* out, uint8_t outMax) {
+  uint8_t n = 0;
+  for (JsonVariant v : list) {
+    JsonArray pair = v.as<JsonArray>();
+    if (pair.isNull() || pair.size() < 2) continue;
+
+    uint16_t start = pair[0] | 0;
+    uint16_t count = pair[1] | 0;
+    if (count == 0) continue;
+    if (start >= NUM_LEDS) continue;
+
+    // clamp to strip
+    uint16_t maxCount = (NUM_LEDS - start);
+    if (count > maxCount) count = maxCount;
+
+    out[n++] = { start, count };
+    if (n >= outMax) break;
+  }
+  return n;
+}
+
+static bool rangesOverlap(const LedRange* a, uint8_t aN, const LedRange* b, uint8_t bN) {
+  if (aN > MAX_RANGES) aN = MAX_RANGES;
+  if (bN > MAX_RANGES) bN = MAX_RANGES;
+
+  for (uint8_t i = 0; i < aN; i++) {
+    uint16_t a0 = a[i].start;
+    uint16_t a1 = a0 + a[i].count; // exclusive
+    for (uint8_t j = 0; j < bN; j++) {
+      uint16_t b0 = b[j].start;
+      uint16_t b1 = b0 + b[j].count; // exclusive
+      if (a0 < b1 && b0 < a1) return true;
+    }
+  }
+  return false;
+}
+
+// Pick a slot. Prefer an inactive one; otherwise steal the first overlapping one; otherwise steal slot 0.
+static int8_t allocateSlotFor(const LedRange* newRanges, uint8_t newN) {
+  for (uint8_t i = 0; i < MAX_SLOTS; i++) {
+    if (!slots[i].active) return (int8_t)i;
+  }
+  for (uint8_t i = 0; i < MAX_SLOTS; i++) {
+    if (rangesOverlap(slots[i].ranges, slots[i].rangeCount, newRanges, newN)) return (int8_t)i;
+  }
+  return 0;
+}
 
 
 // Wifi callback for digesting commands over Mqtt
@@ -363,11 +651,11 @@ void handleMqttMessage() {
 
   if (strcmp(cmd, "remove") == 0) {
     remove();
+    forceLedRender = true;
     return;
   }
 
   if (strcmp(cmd, "on") == 0) {
-    stopLedEffects();
     uint8_t r = doc["r"] | 255;
     uint8_t g = doc["g"] | 255;
     uint8_t b = doc["b"] | 255;
@@ -375,59 +663,172 @@ void handleMqttMessage() {
     uint8_t brightness = doc["brightness"] | 255;
     int16_t duration_s = doc["duration"] | -1;
 
-    uint16_t start = doc["start"] | 0;
-    uint16_t count = doc["count"] | NUM_LEDS;
+    if (!doc.containsKey("ledList")) {
+      Serial.println("on rejected: missing ledList");
+      return;
+    }
 
-    on(r, g, b, duration_s, brightness, start, count);
+    LedRange tmp[MAX_RANGES];
+    JsonArray list = doc["ledList"].as<JsonArray>();
+    uint8_t n = parseLedList(list, tmp, MAX_RANGES);
+    if (n == 0) {
+      Serial.println("on rejected: empty ledList");
+      return;
+    }
+
+    cancelOverlappingSlots(tmp, n);
+    int8_t idx = allocateSlotFor(tmp, n);
+    clearSlot((uint8_t)idx);
+
+    LedSlot& s = slots[idx];
+    s.active = true;
+    s.type = EFFECT_ON;
+    s.r = r; s.g = g; s.b = b;
+    s.maxBrightness = brightness;
+
+    s.rangeCount = n;
+    for (uint8_t i = 0; i < n; i++) s.ranges[i] = tmp[i];
+
+    if (duration_s < 0) s.offAtMs = 0;
+    else s.offAtMs = millis() + (uint32_t)duration_s * 1000UL;
+
+    // force render next tick
+    s.blinkNextToggleMs = 0;
+    s.lastFrameMs = 0;
+
+    forceLedRender = true;
     return;
-  }
+    }
 
   if (strcmp(cmd, "blink") == 0) {
-    stopLedEffects();
     uint8_t r = doc["r"] | 255;
     uint8_t g = doc["g"] | 255;
     uint8_t b = doc["b"] | 255;
 
     uint16_t interval_ms = doc["interval"] | 500;
-    uint8_t times = doc["times"] | 0;
-
+    uint8_t times = doc["times"] | 0; // 0 = infinite
     uint8_t brightness = doc["brightness"] | 255;
-    uint16_t start = doc["start"] | 0;
-    uint16_t count = doc["count"] | NUM_LEDS;
 
-    blink(r, g, b, interval_ms, times, brightness, start, count);
+    if (!doc.containsKey("ledList")) {
+      Serial.println("blink rejected: missing ledList");
+      return;
+    }
+
+    LedRange tmp[MAX_RANGES];
+    JsonArray list = doc["ledList"].as<JsonArray>();
+    uint8_t n = parseLedList(list, tmp, MAX_RANGES);
+    if (n == 0) {
+      Serial.println("blink rejected: empty ledList");
+      return;
+    }
+
+    cancelOverlappingSlots(tmp, n);
+    int8_t idx = allocateSlotFor(tmp, n);
+    clearSlot((uint8_t)idx);
+
+    LedSlot& s = slots[idx];
+    s.active = true;
+    s.type = EFFECT_BLINK;
+    s.r = r; s.g = g; s.b = b;
+    s.maxBrightness = brightness;
+
+    s.rangeCount = n;
+    for (uint8_t i = 0; i < n; i++) s.ranges[i] = tmp[i];
+
+    s.blinkIntervalMs = interval_ms;
+    s.blinkIsOn = false;
+    s.blinkNextToggleMs = millis(); // toggle immediately
+
+    s.blinkRemainingToggles = (times == 0) ? 0 : (uint16_t)times * 2;
+
+    forceLedRender = true;
     return;
   }
 
+
   if (strcmp(cmd, "breathe") == 0) {
-    stopLedEffects();
     uint8_t r = doc["r"] | 255;
     uint8_t g = doc["g"] | 255;
     uint8_t b = doc["b"] | 255;
 
-    int16_t duration_s = doc["duration"] | 1; // half-cycle seconds
+    int16_t duration_s = doc["duration"] | 1;   // HALF cycle seconds
     uint8_t brightness = doc["brightness"] | 255;
 
-    uint16_t start = doc["start"] | 0;
-    uint16_t count = doc["count"] | NUM_LEDS;
+    if (!doc.containsKey("ledList")) {
+      Serial.println("breathe rejected: missing ledList");
+      return;
+    }
 
-    breathe(r, g, b, duration_s, brightness, start, count);
+    LedRange tmp[MAX_RANGES];
+    JsonArray list = doc["ledList"].as<JsonArray>();
+    uint8_t n = parseLedList(list, tmp, MAX_RANGES);
+    if (n == 0) {
+      Serial.println("breathe rejected: empty ledList");
+      return;
+    }
+
+    cancelOverlappingSlots(tmp, n);
+    int8_t idx = allocateSlotFor(tmp, n);
+    clearSlot((uint8_t)idx);
+
+    uint32_t halfMs = (uint32_t)max<int16_t>(1, duration_s) * 1000UL;
+    uint32_t cycleMs = halfMs * 2UL;
+    if (cycleMs == 0) cycleMs = 1;
+
+    LedSlot& s = slots[idx];
+    s.active = true;
+    s.type = EFFECT_BREATHE;
+    s.r = r; s.g = g; s.b = b;
+    s.maxBrightness = brightness;
+
+    s.rangeCount = n;
+    for (uint8_t i = 0; i < n; i++) s.ranges[i] = tmp[i];
+
+    s.phaseStep = (uint16_t)((65536UL * BREATHE_FRAME_MS) / cycleMs);
+    if (s.phaseStep == 0) s.phaseStep = 1;
+
+    s.phase16 = (uint16_t)(64 << 8); // start bright
+    s.lastFrameMs = millis();
+
+    forceLedRender = true;
     return;
   }
+
 
   if (strcmp(cmd, "off") == 0) {
-    stopLedEffects();
-    uint16_t start = doc["start"] | 0;
-    uint16_t count = doc["count"] | NUM_LEDS;
+    bool all = doc["all"] | false;
 
-    off(start, count);
-    Serial.println("Executed OFF command");
+    if (all || !doc.containsKey("ledList")) {
+      stopLedEffects();
+      forceLedRender = true;
+      return;
+    }
+
+    LedRange tmp[MAX_RANGES];
+    JsonArray list = doc["ledList"].as<JsonArray>();
+    uint8_t n = parseLedList(list, tmp, MAX_RANGES);
+    if (n == 0) {
+      Serial.println("off rejected: empty ledList");
+      return;
+    }
+
+    int8_t idx = allocSlot();
+    clearSlot((uint8_t)idx);
+
+    LedSlot& s = slots[idx];
+    s.active = true;
+    s.type = EFFECT_MASK_OFF;
+    copyRangesToSlot(s, tmp, n);
+
+    forceLedRender = true;
     return;
   }
 
-  Serial.print("Unknown cmd: ");
-  Serial.println(cmd);
-}
+
+
+    Serial.print("Unknown cmd: ");
+    Serial.println(cmd);
+  }
 
 // Set up Mqtt Client 
 PubSubClient    mqttClient(mqttServer, 1883, WiFi_callback, Wifi_net);
@@ -614,12 +1015,7 @@ void setup() {
   deviceName = prefs.getString("deviceName", "");
   prefs.end();
 
-  Serial.print("Device Secret: ");
-  Serial.println(secret);
-  Serial.print("Device Name: ");
-  Serial.println(deviceName);
-
-  // Verify that we have a secret for registration
+  // Verify if we have a secret (if we do then we are registered, not if we don't)
   registered = (secret.length() > 0);
 
   // Setup the mqttClient
