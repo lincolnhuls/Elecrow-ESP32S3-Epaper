@@ -24,8 +24,8 @@
 WiFiManager wifiManager;
 Preferences prefs;
 
-#define MAX_SLOTS 8
-#define MAX_RANGES 16
+#define MAX_SLOTS 25
+#define MAX_RANGES 25
 
 // Flag for register state
 bool registered = false;
@@ -367,16 +367,16 @@ void stopLedEffects() {
 // ---------------------- Slot state update ----------------------
 
 static bool updateSlotState(LedSlot& s, uint32_t now) {
-  // returns true if anything about the slot changed (so we should re-render)
   if (!s.active) return false;
 
-  // 1) timed ON: expire
-  if (s.type == EFFECT_ON && s.offAtMs != 0 && (int32_t)(now - s.offAtMs) >= 0) {
+  // Expire timed effects (ON and OFF mask)
+  if ((s.type == EFFECT_ON || s.type == EFFECT_MASK_OFF) &&
+      s.offAtMs != 0 && (int32_t)(now - s.offAtMs) >= 0) {
     s.active = false;
     return true;
   }
 
-  // 2) blink: toggle on schedule
+  // Blink: toggle on schedule
   if (s.type == EFFECT_BLINK) {
     if ((int32_t)(now - s.blinkNextToggleMs) >= 0) {
       s.blinkNextToggleMs = now + s.blinkIntervalMs;
@@ -385,7 +385,7 @@ static bool updateSlotState(LedSlot& s, uint32_t now) {
       if (s.blinkRemainingToggles > 0) {
         s.blinkRemainingToggles--;
         if (s.blinkRemainingToggles == 0) {
-          s.active = false; // done blinking
+          s.active = false;
         }
       }
       return true;
@@ -393,13 +393,13 @@ static bool updateSlotState(LedSlot& s, uint32_t now) {
     return false;
   }
 
-  // 3) breathe: advance phase on frame cadence
+  // Breathe: advance phase on frame cadence
   if (s.type == EFFECT_BREATHE) {
     uint32_t elapsed = now - s.lastFrameMs;
     if (elapsed < BREATHE_FRAME_MS) return false;
 
     uint32_t frames = elapsed / BREATHE_FRAME_MS;
-    if (frames > 3) frames = 3;          // cap catch-up
+    if (frames > 3) frames = 3;
     s.lastFrameMs += frames * BREATHE_FRAME_MS;
     s.phase16 += (uint16_t)(frames * s.phaseStep);
     return true;
@@ -819,6 +819,7 @@ void handleMqttMessage() {
     s.active = true;
     s.type = EFFECT_MASK_OFF;
     copyRangesToSlot(s, tmp, n);
+    s.offAtMs = millis() + 500;
 
     forceLedRender = true;
     return;
@@ -894,7 +895,7 @@ bool requestRegister() {
   char out[128];
   size_t n = serializeJson(doc, out, sizeof(out));
 
-  return mqttClient.publish(reportTopic, out, n);
+  return mqttClient.publish(reportTopic, (const uint8_t*)out, (unsigned int)n, false);
 }
 
 void heartbeat() {
@@ -916,7 +917,7 @@ void heartbeat() {
   char out[256];
   size_t n = serializeJson(doc, out, sizeof(out));
 
-  bool ok = mqttClient.publish(heartbeatTopic, out, n);
+  bool ok = mqttClient.publish(heartbeatTopic, (const uint8_t*)out, (unsigned int)n, false);
   Serial.print("Heartbeat publish: ");
   Serial.println(ok ? "ok" : "failed");
 }
