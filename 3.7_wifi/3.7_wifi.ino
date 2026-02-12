@@ -199,6 +199,128 @@ static bool slotOverlapsList(const LedSlot& s, const LedRange* list, uint8_t lis
   return false;
 }
 
+static bool subtractOneRange(const LedRange& src, const LedRange& cut, LedRange* out, uint8_t& outN) {
+  // returns up to 2 ranges in out (appends); true if src changed
+  uint32_t s0 = src.start;
+  uint32_t s1 = (uint32_t)src.start + (uint32_t)src.count; // exclusive
+  uint32_t c0 = cut.start;
+  uint32_t c1 = (uint32_t)cut.start + (uint32_t)cut.count; // exclusive
+
+  // no overlap
+  if (!(s0 < c1 && c0 < s1)) {
+    if (outN < MAX_RANGES) out[outN++] = src;
+    return false;
+  }
+
+  // left remainder [s0, min(s1,c0))
+  uint32_t left1 = (c0 < s1) ? c0 : s1;
+  if (s0 < left1) {
+    if (outN < MAX_RANGES) out[outN++] = { (uint16_t)s0, (uint16_t)(left1 - s0) };
+  }
+
+  // right remainder [max(s0,c1), s1)
+  uint32_t right0 = (c1 > s0) ? c1 : s0;
+  if (right0 < s1) {
+    if (outN < MAX_RANGES) out[outN++] = { (uint16_t)right0, (uint16_t)(s1 - right0) };
+  }
+
+  return true;
+}
+
+static bool subtractCutsFromSlot(LedSlot& s, const LedRange* cuts, uint8_t cutN) {
+  if (!s.active) return false;
+  if (s.rangeCount == 0) return false;
+
+  if (cutN > MAX_RANGES) cutN = MAX_RANGES;
+
+  LedRange working[MAX_RANGES];
+  uint8_t workingN = 0;
+
+  // start with current ranges
+  uint8_t srcN = s.rangeCount;
+  if (srcN > MAX_RANGES) srcN = MAX_RANGES;
+  for (uint8_t i = 0; i < srcN; i++) working[workingN++] = s.ranges[i];
+
+  bool changed = false;
+
+  // subtract each cut
+  for (uint8_t c = 0; c < cutN; c++) {
+    LedRange next[MAX_RANGES];
+    uint8_t nextN = 0;
+
+    for (uint8_t i = 0; i < workingN; i++) {
+      bool didChange = subtractOneRange(working[i], cuts[c], next, nextN);
+      changed = changed || didChange;
+      if (nextN >= MAX_RANGES) break;
+    }
+
+    // move next -> working
+    workingN = nextN;
+    for (uint8_t i = 0; i < workingN; i++) working[i] = next[i];
+
+    if (workingN == 0) break;
+  }
+
+  // apply back to slot
+  if (workingN == 0) {
+    clearSlot((uint8_t)(&s - slots)); // index math relies on contiguous array
+    return true;
+  }
+
+  if (changed) {
+    s.rangeCount = workingN;
+    for (uint8_t i = 0; i < workingN; i++) s.ranges[i] = working[i];
+  }
+  return changed;
+}
+
+// safer version without pointer math
+static bool subtractCutsFromSlotByIndex(uint8_t slotIdx, const LedRange* cuts, uint8_t cutN) {
+  if (slotIdx >= MAX_SLOTS) return false;
+  LedSlot& s = slots[slotIdx];
+  if (!s.active) return false;
+
+  // run subtract, but clear by known index
+  LedRange working[MAX_RANGES];
+  uint8_t workingN = 0;
+
+  uint8_t srcN = s.rangeCount;
+  if (srcN > MAX_RANGES) srcN = MAX_RANGES;
+  for (uint8_t i = 0; i < srcN; i++) working[workingN++] = s.ranges[i];
+
+  bool changed = false;
+  if (cutN > MAX_RANGES) cutN = MAX_RANGES;
+
+  for (uint8_t c = 0; c < cutN; c++) {
+    LedRange next[MAX_RANGES];
+    uint8_t nextN = 0;
+
+    for (uint8_t i = 0; i < workingN; i++) {
+      bool didChange = subtractOneRange(working[i], cuts[c], next, nextN);
+      changed = changed || didChange;
+      if (nextN >= MAX_RANGES) break;
+    }
+
+    workingN = nextN;
+    for (uint8_t i = 0; i < workingN; i++) working[i] = next[i];
+
+    if (workingN == 0) break;
+  }
+
+  if (workingN == 0) {
+    clearSlot(slotIdx);
+    return true;
+  }
+
+  if (changed) {
+    s.rangeCount = workingN;
+    for (uint8_t i = 0; i < workingN; i++) s.ranges[i] = working[i];
+  }
+
+  return changed;
+}
+
+
 // ---------------------- Slot lifecycle ----------------------
 
 static void clearSlot(uint8_t i) {
@@ -812,16 +934,14 @@ void handleMqttMessage() {
       return;
     }
 
-    int8_t idx = allocSlot();
-    clearSlot((uint8_t)idx);
+    bool changed = false;
+    for (uint8_t i = 0; i < MAX_SLOTS; i++) {
+      if (!slots[i].active) continue;
+      if (slots[i].type == EFFECT_MASK_OFF) continue;
+      if (subtractCutsFromSlotByIndex(i, tmp, n)) changed = true;
+    }
 
-    LedSlot& s = slots[idx];
-    s.active = true;
-    s.type = EFFECT_MASK_OFF;
-    copyRangesToSlot(s, tmp, n);
-    s.offAtMs = millis() + 500;
-
-    forceLedRender = true;
+    if (changed) forceLedRender = true;
     return;
   }
 
