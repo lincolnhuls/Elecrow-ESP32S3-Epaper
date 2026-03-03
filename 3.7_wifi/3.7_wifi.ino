@@ -1,5 +1,3 @@
-#include <DTF_ESP32Update.h>
-
 // Flash settings for this board are fairly specific
 // 
 // Board: ESP32S3 Dev Module 
@@ -9,7 +7,9 @@
 // Upload Speed: "460800" (Board will not upload if this is not set) 
 
 
+
 // Import needed libraries
+#include <DTF_ESP32Update.h>
 #include <PubSubClient.h>
 #include <FastLED.h>
 #include <QRCodeGenerator.h>
@@ -24,7 +24,7 @@
 
 // Version information for Deploy The Fleet
 String CURRENT_VERSION = "1.0.0";
-String DTF_PRODUCT_ID = "z";
+String DTF_PRODUCT_ID = "e2e5ee12-254d-458c-883c-7f9db5215e0e";
 
 // Flag for software update
 bool needToUpdate = false;
@@ -1232,7 +1232,6 @@ void loop() {
       connectedScreenShown = false;
       showRegisteringScreen();
     }
-
     registerAttempt();
     return;
   }
@@ -1243,10 +1242,12 @@ void loop() {
     showConnectedDashboard();
   }
 
-  if (WiFi.status() == WL_CONNECTED && registered && !dtfCheckedInThisBoot) {
-    dtfCheckedInThisBoot = true;
-    DTF_ESP32Update::getFirmwareUpdate(DTF_PRODUCT_ID.c_str(), CURRENT_VERSION.c_str());
-  }
+  // Auto check-in so current firmware version is reported correctly in DTF console
+  // Removed for now so that the device only updates when commanded to rather than trying every boot
+  // if (WiFi.status() == WL_CONNECTED && registered && !dtfCheckedInThisBoot) {
+  //   dtfCheckedInThisBoot = true;
+  //   DTF_ESP32Update::getFirmwareUpdate(DTF_PRODUCT_ID.c_str(), CURRENT_VERSION.c_str());
+  // }
 
   if (needToUpdate) {
     if(WiFi.status() == WL_CONNECTED) {
