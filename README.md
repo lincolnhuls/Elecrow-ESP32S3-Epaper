@@ -14,7 +14,7 @@ Use the following **exact** settings in the Arduino IDE or PlatformIO:
 
 - **Board:** ESP32S3 Dev Module  
 - **Flash Size:** 8MB (64Mb)  
-- **Partition Scheme:** Huge APP (3MB No OTA / 1MB SPIFFS)  
+- **Partition Scheme:** "8M with spiffs (3MB APP/1.5MB SPIFFS)"  
 - **PSRAM:** OPI PSRAM  
 - **Upload Speed:** 460800  
   > ⚠️ Upload will fail if this is not set correctly
@@ -30,6 +30,18 @@ To remove the device from its current adoption in the software use the following
 {
   "secret":"yourSecret",
   "cmd":"remove"
+}
+```
+
+---
+
+### Updating the Device
+
+To use OTA updates for the device use the following command
+```json
+{
+  "secret":"yourSecret",
+  "cmd":"update"
 }
 ```
 
