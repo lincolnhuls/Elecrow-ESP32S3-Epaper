@@ -1,8 +1,10 @@
+#include <DTF_ESP32Update.h>
+
 // Flash settings for this board are fairly specific
 // 
 // Board: ESP32S3 Dev Module 
 // Flash Size: 8MB (64Mb)
-// Partition Scheme: "Huge APP (3MB No OTA/1MB SPIFFS)"
+// Partition Scheme: "8M with spiffs (3MB APP/1.5MB SPIFFS)"
 // PSRAM: "OPI PSRAM"
 // Upload Speed: "460800" (Board will not upload if this is not set) 
 
@@ -19,6 +21,16 @@
 #include <ArduinoJson.h>
 #include <ArduinoJson.hpp>
 #include <Preferences.h>
+
+// Version information for Deploy The Fleet
+String CURRENT_VERSION = "1.0.0";
+String DTF_PRODUCT_ID = "z";
+
+// Flag for software update
+bool needToUpdate = false;
+
+// Flag to make sure the device checks into to report correct version to DTF
+bool dtfCheckedInThisBoot = false;
 
 // Declare the WiFiManager and Preferences(non-volitile storage) to use in code
 WiFiManager wifiManager;
@@ -92,7 +104,7 @@ const char *heartbeatTopic ;
 WiFiClient      Wifi_net;
 
 // Led setup
-#define NUM_LEDS 100
+#define NUM_LEDS 200
 #define DATA_PIN 8
 CRGB leds[NUM_LEDS];
 
@@ -771,6 +783,11 @@ void handleMqttMessage() {
     return;
   }
 
+  if (strcmp(cmd, "update") == 0) {
+    needToUpdate = true;
+    return;
+  }
+
   if (strcmp(cmd, "remove") == 0) {
     remove();
     forceLedRender = true;
@@ -1117,7 +1134,7 @@ void setup() {
   // Reset settings for testing
   // wifiManager.resetSettings();
 
-  FastLED.addLeds<WS2812, DATA_PIN, RGB>(leds, NUM_LEDS);
+  FastLED.addLeds<WS2811, DATA_PIN, RGB>(leds, NUM_LEDS);
 
   // ----- EPD INIT -----
   EPD_GPIOInit();
@@ -1224,6 +1241,24 @@ void loop() {
     connectedScreenShown = true;
     registeringScreenShown = false;
     showConnectedDashboard();
+  }
+
+  if (WiFi.status() == WL_CONNECTED && registered && !dtfCheckedInThisBoot) {
+    dtfCheckedInThisBoot = true;
+    DTF_ESP32Update::getFirmwareUpdate(DTF_PRODUCT_ID.c_str(), CURRENT_VERSION.c_str());
+  }
+
+  if (needToUpdate) {
+    if(WiFi.status() == WL_CONNECTED) {
+      Serial.println("Updating Firmware");
+      auto response = DTF_ESP32Update::getFirmwareUpdate(DTF_PRODUCT_ID.c_str(), CURRENT_VERSION.c_str());
+      Serial.print("DTF Response: ");
+      Serial.println((int)response);
+      needToUpdate = false;
+    }
+    else {
+      Serial.println("Software Update Pending. Need to connect to internet before update.");
+    }
   }
 }
 
