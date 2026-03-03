@@ -14,7 +14,7 @@ Use the following **exact** settings in the Arduino IDE or PlatformIO:
 
 - **Board:** ESP32S3 Dev Module  
 - **Flash Size:** 8MB (64Mb)  
-- **Partition Scheme:** Huge APP (3MB No OTA / 1MB SPIFFS)  
+- **Partition Scheme:** "8M with spiffs (3MB APP/1.5MB SPIFFS)"  
 - **PSRAM:** OPI PSRAM  
 - **Upload Speed:** 460800  
   > ⚠️ Upload will fail if this is not set correctly
