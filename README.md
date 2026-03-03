@@ -35,6 +35,18 @@ To remove the device from its current adoption in the software use the following
 
 ---
 
+### Updating the Device
+
+To use OTA updates for the device use the following command
+```json
+{
+  "secret":"yourSecret",
+  "cmd":"update"
+}
+```
+
+---
+
 ### Using the LEDs
 
 - **On**
