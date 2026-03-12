@@ -3,8 +3,13 @@
 
 #include "EPD_SPI.h"
 
+// For default screen size
 #define EPD_W 240 
 #define EPD_H 416
+
+// For new screen, different size
+// #define EPD_W 184
+// #define EPD_H 384
 
 #define WHITE 0xFF
 #define BLACK 0x00

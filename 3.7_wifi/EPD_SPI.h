@@ -4,6 +4,7 @@
 #include <Arduino.h>
 
 //项目板子
+// For default 3.7 inch screen
 #define SCK 12
 #define MOSI 11
 #define RES 47
@@ -17,6 +18,15 @@
 //#define DC 9
 //#define CS 10
 //#define BUSY 48
+
+// For new 3.5 inch 
+// #define isEPD_W21_BUSY digitalRead(48)  //BUSY
+// #define EPD_W21_RST_0 digitalWrite(47,LOW)  //RES
+// #define EPD_W21_RST_1 digitalWrite(47,HIGH)
+// #define EPD_W21_DC_0  digitalWrite(46,LOW) //DC
+// #define EPD_W21_DC_1  digitalWrite(46,HIGH)
+// #define EPD_W21_CS_0 digitalWrite(45,LOW) //CS
+// #define EPD_W21_CS_1 digitalWrite(45,HIGH)
 
 #define EPD_SCK_Clr() digitalWrite(SCK, LOW)
 #define EPD_SCK_Set() digitalWrite(SCK, HIGH)

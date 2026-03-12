@@ -23,7 +23,7 @@
 #include <Preferences.h>
 
 // Version information for Deploy The Fleet
-String CURRENT_VERSION = "1.0.0";
+String CURRENT_VERSION = "1.0.1";
 String DTF_PRODUCT_ID = "e2e5ee12-254d-458c-883c-7f9db5215e0e";
 
 // Flag for software update
@@ -1050,6 +1050,7 @@ void heartbeat() {
   doc["ssid"] = WiFi.SSID().c_str();
   doc["ip"] = WiFi.localIP().toString();
   doc["rssi"] = WiFi.RSSI();
+  doc["version"] = CURRENT_VERSION;
 
   char out[256];
   size_t n = serializeJson(doc, out, sizeof(out));
@@ -1295,6 +1296,10 @@ void showConnectedDashboard() {
 
   snprintf(buffer, sizeof(buffer), "Device name: %s", deviceName.c_str());
   EPD_ShowString(10, 135, buffer, 16, BLACK);
+
+  snprintf(buffer, sizeof(buffer), "Device version: %s", CURRENT_VERSION.c_str());
+  EPD_ShowString(10, 160, buffer, 16, BLACK);
+
 
 
   // QR Code (right side)
