@@ -1060,7 +1060,7 @@ void updateBootDots(uint8_t dotCount) {
 void showUpdatingScreenBase() {
   EPD_FastInit();
 
-  Paint_NewImage(ImageBW, EPD_W, EPD_H, 180, WHITE);
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, ROTATION, WHITE);
   Paint_Clear(WHITE);
 
   EPD_ShowString(10, 10, "UPDATE DETECTED", 16, BLACK);

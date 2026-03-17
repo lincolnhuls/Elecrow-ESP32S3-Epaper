@@ -3,7 +3,7 @@
   "builtInLibrariesFolders": "/Users/macminiairsoft/Library/Arduino15/libraries",
   "compiler.optimization_flags": "-Os",
   "customBuildProperties": "",
-  "fqbn": "esp32:esp32:esp32s3:UploadSpeed=460800,USBMode=hwcdc,CDCOnBoot=default,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=huge_app,DebugLevel=none,PSRAM=opi,LoopCore=1,EventsCore=1,EraseFlash=none,JTAGAdapter=default,ZigbeeMode=default",
+  "fqbn": "esp32:esp32:esp32s3:UploadSpeed=460800,USBMode=hwcdc,CDCOnBoot=default,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,DebugLevel=none,PSRAM=opi,LoopCore=1,EventsCore=1,EraseFlash=none,JTAGAdapter=default,ZigbeeMode=default",
   "hardwareFolders": "/Users/macminiairsoft/Library/Arduino15/packages/esp32/hardware/esp32/3.3.7,/Users/macminiairsoft/Library/Arduino15/packages/esp32/hardware/esp32/3.3.7",
   "otherLibrariesFolders": "/Users/macminiairsoft/Documents/Arduino/libraries",
   "sketchLocation": "/Users/macminiairsoft/Documents/GitHub/Elecrow-ESP32S3-Epaper/display3.5inch"
