@@ -38,6 +38,9 @@ Preferences prefs;
 #define MAX_SLOTS 25
 #define MAX_RANGES 25
 
+// Rotation for easy rotation applications
+int ROTATION = 0;
+
 // Flag for register state
 bool registered = false;
 bool registeringScreenShown = false;
@@ -125,6 +128,8 @@ void displayQRCodeOnEPD(const char* text, int yOffset = -1, int qrScale = 4);
 void drawWiFiIcon(int x, int y, int bars);
 void showRegisteringScreen();
 void showConnectedDashboard();
+void showUpdatingScreenBase();
+void updateUpdatingDots(uint8_t dotCount);
 void remove();
 bool requestRegister();
 void showBootScreenBase();
@@ -1027,7 +1032,7 @@ void clearBootDotsInBuffer() {
 }
 
 void showBootScreenBase() {
-  Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, ROTATION, WHITE);
   Paint_Clear(WHITE);
 
   EPD_ShowString(10, 10, "Connecting to WiFi", 16, BLACK);
@@ -1049,6 +1054,40 @@ void updateBootDots(uint8_t dotCount) {
   if (dotCount >= 3) EPD_ShowString(168, 10, ".", 16, BLACK);
 
   // Partial-refresh using the full buffer
+  EPD_Dis_PartAll(ImageBW);
+}
+
+void showUpdatingScreenBase() {
+  EPD_FastInit();
+
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, 180, WHITE);
+  Paint_Clear(WHITE);
+
+  EPD_ShowString(10, 10, "UPDATE DETECTED", 16, BLACK);
+  EPD_ShowString(10, 34, "Updating device", 16, BLACK);
+
+  // first draw of this screen should be full
+  EPD_Display(ImageBW);
+
+  // seed panel memory for repeated partial updates
+  EPD_SetRAMValue_BaseMap(ImageBW);
+}
+
+void clearUpdatingDotsInBuffer() {
+  for (int x = 132; x < 150; x++) {
+    for (int y = 34; y < 50; y++) {
+      Paint_SetPixel(x, y, WHITE);
+    }
+  }
+}
+
+void updateUpdatingDots(uint8_t dotCount) {
+  clearUpdatingDotsInBuffer();
+
+  if (dotCount >= 1) EPD_ShowString(132, 34, ".", 16, BLACK);
+  if (dotCount >= 2) EPD_ShowString(138, 34, ".", 16, BLACK);
+  if (dotCount >= 3) EPD_ShowString(144, 34, ".", 16, BLACK);
+
   EPD_Dis_PartAll(ImageBW);
 }
 
@@ -1108,7 +1147,7 @@ void heartbeat() {
 void showWifiSetupScreen(const char* apName) {
   EPD_FastInit();
 
-  Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, ROTATION, WHITE);
   Paint_Clear(WHITE);
 
   EPD_ShowString(10, 10,  "WIFI SETUP REQUIRED", 16, BLACK);
@@ -1129,7 +1168,7 @@ void showWifiSetupScreen(const char* apName) {
 void showRegisteringScreen() {
   EPD_FastInit();
 
-  Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, ROTATION, WHITE);
   Paint_Clear(WHITE);
 
   EPD_ShowString(10, 10,  "WIFI CONNECTED", 16, BLACK);
@@ -1181,7 +1220,7 @@ void setup() {
   // Get wifi id
   wifiID = shortId;
 
-  Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, ROTATION, WHITE);
   Paint_Clear(WHITE);
   
   // True means that namespace can be read but not written to, false is read and write
@@ -1303,9 +1342,22 @@ void loop() {
   if (needToUpdate) {
     if (WiFi.status() == WL_CONNECTED) {
       Serial.println("Updating Firmware");
-      auto response = DTF_ESP32Update::getFirmwareUpdate(DTF_PRODUCT_ID.c_str(), CURRENT_VERSION.c_str());
+
+      showUpdatingScreenBase();
+
+      for (uint8_t i = 0; i < 4; i++) {
+        updateUpdatingDots(i % 4);   // 0,1,2,3
+        delay(300);
+      }
+
+      auto response = DTF_ESP32Update::getFirmwareUpdate(
+        DTF_PRODUCT_ID.c_str(),
+        CURRENT_VERSION.c_str()
+      );
+
       Serial.print("DTF Response: ");
       Serial.println((int)response);
+
       needToUpdate = false;
     } else {
       Serial.println("Software Update Pending. Need to connect to internet before update.");
@@ -1319,7 +1371,7 @@ void loop() {
 void showConnectedDashboard() {
   EPD_FastInit();
 
-  Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, ROTATION, WHITE);
   Paint_Clear(WHITE);
 
   EPD_ShowString(10, 10, "CONNECTED", 16, BLACK);
