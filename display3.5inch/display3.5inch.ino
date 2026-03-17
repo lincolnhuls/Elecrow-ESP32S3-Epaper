@@ -19,6 +19,7 @@
 #include <ArduinoJson.h>
 #include <ArduinoJson.hpp>
 #include <Preferences.h>
+#include <Display_EPD_W21.h>
 
 // Version information for Deploy The Fleet
 String CURRENT_VERSION = "1.0.1";
@@ -126,6 +127,8 @@ void showRegisteringScreen();
 void showConnectedDashboard();
 void remove();
 bool requestRegister();
+void showBootScreenBase();
+void updateBootDots(uint8_t dotCount);
 
 // Declare space for chipid and shortId
 uint64_t chipid;
@@ -1011,6 +1014,44 @@ void remove() {
   showRegisteringScreen();
 }
 
+// Pixels - 154, 161, 168
+
+void clearBootDotsInBuffer() {
+  // Clear just the dots area in the full-screen buffer
+  // Covers the three dots at x = 154, 161, 168
+  for (int x = 154; x < 176; x++) {
+    for (int y = 10; y < 26; y++) {
+      Paint_SetPixel(x, y, WHITE);
+    }
+  }
+}
+
+void showBootScreenBase() {
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
+  Paint_Clear(WHITE);
+
+  EPD_ShowString(10, 10, "Connecting to WiFi", 16, BLACK);
+
+  // First draw after boot should be full refresh
+  EPD_Display(ImageBW);
+
+  // Seed the panel for later partial updates
+  EPD_SetRAMValue_BaseMap(ImageBW);
+}
+
+void updateBootDots(uint8_t dotCount) {
+  // Modify the existing full-screen buffer using the same coordinates
+  // that already look correct in your normal drawing code.
+  clearBootDotsInBuffer();
+
+  if (dotCount >= 1) EPD_ShowString(154, 10, ".", 16, BLACK);
+  if (dotCount >= 2) EPD_ShowString(161, 10, ".", 16, BLACK);
+  if (dotCount >= 3) EPD_ShowString(168, 10, ".", 16, BLACK);
+
+  // Partial-refresh using the full buffer
+  EPD_Dis_PartAll(ImageBW);
+}
+
 void registerAttempt() {
   if (registered) return;
 
@@ -1066,7 +1107,6 @@ void heartbeat() {
 // WiFi setup screen
 void showWifiSetupScreen(const char* apName) {
   EPD_FastInit();
-  EPD_Display_Clear();
 
   Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
   Paint_Clear(WHITE);
@@ -1082,14 +1122,12 @@ void showWifiSetupScreen(const char* apName) {
   snprintf(buffer, sizeof(buffer), "WIFI:T:nopass;S:%s;;", apName);
   displayQRCodeOnEPD(buffer, -1, QR_LARGE_SCALE);
 
-  EPD_Display(ImageBW);
-  EPD_Update();
+  EPD_WhiteScreen_ALL_Fast(ImageBW);
 }
 
 // Stage two screen while connecting to mqtt and getting registered
 void showRegisteringScreen() {
   EPD_FastInit();
-  EPD_Display_Clear();
 
   Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
   Paint_Clear(WHITE);
@@ -1105,8 +1143,7 @@ void showRegisteringScreen() {
 
   displayQRCodeOnEPD(shortId, -1, QR_LARGE_SCALE);
 
-  EPD_Display(ImageBW);
-  EPD_Update();
+  EPD_WhiteScreen_ALL_Fast(ImageBW);
 }
 
 // ----------------------------------------------------
@@ -1172,15 +1209,28 @@ void setup() {
   ////////////////////////////////////////////////////////////
 
   // BOOT SCREEN
-  EPD_ShowString(10, 10, "Connecting to WiFi...", 16, BLACK);
-  EPD_Display(ImageBW);
-  EPD_Update();
+  showBootScreenBase();
 
-  delay(1500); // allow panel to settle
-
-  // ----- WIFI INIT (NON-BLOCKING) -----
   WiFi.mode(WIFI_STA);
   WiFi.begin();
+
+  uint32_t bootStartMs = millis();
+  uint32_t lastDotMs = 0;
+  uint8_t dotCount = 0;
+
+  // animate while trying saved WiFi for up to 10 seconds
+  while (WiFi.status() != WL_CONNECTED && millis() - bootStartMs < 10000) {
+    if (millis() - lastDotMs >= 400) {
+      lastDotMs = millis();
+      dotCount = (dotCount + 1) % 4;   // 0,1,2,3,0...
+      updateBootDots(dotCount);
+    }
+    delay(10);
+  }
+ 
+  // ----- WIFI INIT (NON-BLOCKING) -----
+  // WiFi.mode(WIFI_STA);
+  // WiFi.begin();
 
   // 10 seconds for trying to connected to a saved network
   wifiManager.setConnectTimeout(10);
@@ -1268,7 +1318,6 @@ void loop() {
 // ----------------------------------------------------
 void showConnectedDashboard() {
   EPD_FastInit();
-  EPD_Display_Clear();
 
   Paint_NewImage(ImageBW, EPD_W, EPD_H, 0, WHITE);
   Paint_Clear(WHITE);
@@ -1296,8 +1345,7 @@ void showConnectedDashboard() {
 
   displayQRCodeOnEPD(SERVICE_UUID.c_str(), -1, QR_LARGE_SCALE);
 
-  EPD_Display(ImageBW);
-  EPD_Update();
+  EPD_WhiteScreen_ALL_Fast(ImageBW);
   EPD_DeepSleep();
 }
 
