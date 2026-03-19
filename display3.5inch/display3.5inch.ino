@@ -31,6 +31,11 @@ bool needToUpdate = false;
 // Flag to make sure the device checks into to report correct version to DTF
 bool dtfCheckedInThisBoot = false;
 
+// RSSI values for comparing and updating screen if needed
+int compareRSSI = 0;
+int currentRSSI = 0;
+int lastRSSI = 0;
+
 // Declare the WiFiManager and Preferences(non-volitile storage) to use in code
 WiFiManager wifiManager;
 Preferences prefs;
@@ -1126,14 +1131,21 @@ void heartbeat() {
   if (millis() - lastHeartbeatMs < HEARTBEAT_PERIOD_MS) return;
   lastHeartbeatMs = millis();
 
+  currentRSSI = WiFi.RSSI();
+
   StaticJsonDocument<256> doc;
   doc["secret"] = secret;
   doc["code"] = shortId;
   doc["uuid"] = SERVICE_UUID;
   doc["ssid"] = WiFi.SSID().c_str();
   doc["ip"] = WiFi.localIP().toString();
-  doc["rssi"] = WiFi.RSSI();
+  doc["rssi"] = currentRSSI;
   doc["version"] = CURRENT_VERSION;
+
+  if (currentRSSI >= compareRSSI + 10 || currentRSSI <= compareRSSI - 10) {
+    showConnectedDashboard();
+    compareRSSI = currentRSSI;
+  }
 
   char out[256];
   size_t n = serializeJson(doc, out, sizeof(out));
@@ -1274,6 +1286,7 @@ void setup() {
   // WiFi.begin();
 
   // 10 seconds for trying to connected to a saved network
+  wifiManager.setClass("invert");
   wifiManager.setConnectTimeout(10);
   wifiManager.setEnableConfigPortal(false);
   bool ok = wifiManager.autoConnect(apName.c_str());
@@ -1385,6 +1398,7 @@ void showConnectedDashboard() {
   EPD_ShowString(10, 50, buffer, 16, BLACK);
 
   long rssi = WiFi.RSSI();
+  compareRSSI = WiFi.RSSI();
   snprintf(buffer, sizeof(buffer), "Signal: %ld dBm", rssi);
   EPD_ShowString(10, 70, buffer, 16, BLACK);
 
