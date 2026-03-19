@@ -22,7 +22,7 @@
 #include <Display_EPD_W21.h>
 
 // Version information for Deploy The Fleet
-String CURRENT_VERSION = "1.0.1";
+String CURRENT_VERSION = "1.0.2";
 String DTF_PRODUCT_ID = "e2e5ee12-254d-458c-883c-7f9db5215e0e";
 
 // Flag for software update
@@ -1151,12 +1151,14 @@ void showWifiSetupScreen(const char* apName) {
   Paint_Clear(WHITE);
 
   EPD_ShowString(10, 10,  "WIFI SETUP REQUIRED", 16, BLACK);
-  EPD_ShowString(10, 34,  "Connect to AP:", 16, BLACK);
-  EPD_ShowString(10, 54,  apName, 16, BLACK);
-  EPD_ShowString(10, 78,  "Navigate to:", 16, BLACK);
-  EPD_ShowString(10, 98,  "192.168.4.1", 16, BLACK);
-  EPD_ShowString(10, 126, "Or scan QR to open", 16, BLACK);
-  EPD_ShowString(10, 146, "setup portal", 16, BLACK);
+  EPD_ShowString(10, 29,  "Connect to AP:", 16, BLACK);
+  EPD_ShowString(10, 48,  apName, 16, BLACK);
+  EPD_ShowString(10, 67,  "Navigate to:", 16, BLACK);
+  EPD_ShowString(10, 84,  "192.168.4.1", 16, BLACK);
+  EPD_ShowString(10, 105, "Or scan QR to open", 16, BLACK);
+  EPD_ShowString(10, 122, "setup portal", 16, BLACK);
+  EPD_ShowString(10, 145, "Unlock phone before scanning", 16, BLACK);
+  EPD_ShowString(10, 164, "Portal may take a minute", 16, BLACK);
  
   snprintf(buffer, sizeof(buffer), "WIFI:T:nopass;S:%s;;", apName);
   displayQRCodeOnEPD(buffer, -1, QR_LARGE_SCALE);
@@ -1209,7 +1211,7 @@ void setup() {
   apName += shortId;
 
   // Reset settings for testing
-  // wifiManager.resetSettings();
+  wifiManager.resetSettings();
 
   FastLED.addLeds<WS2811, DATA_PIN, RGB>(leds, NUM_LEDS);
 
