@@ -1211,7 +1211,7 @@ void setup() {
   apName += shortId;
 
   // Reset settings for testing
-  wifiManager.resetSettings();
+  // wifiManager.resetSettings();
 
   FastLED.addLeds<WS2811, DATA_PIN, RGB>(leds, NUM_LEDS);
 
