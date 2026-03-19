@@ -2,7 +2,7 @@
 
 ### 📁 Required Files
 - **All files in this folder must be included** when uploading.
-- This code **only works with the 3.7-inch e-paper display**.
+- This code is screen size specific, if the code for a different screen size is uploaded, it won't work. **Make sure you upload the right code for your screen size**.
 
 ---
 ### In the PubSub library, the PubSubClient.h file has a hardcoded buffer that needs to be expanded, 5000 should work
