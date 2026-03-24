@@ -7,6 +7,18 @@
 #define EPD_W 184
 #define EPD_H 384
 
+// E-paper control pin mapping.
+// Update these if your new board routes the display to different GPIOs.
+#define EPD_PIN_CS    45
+#define EPD_PIN_DC    46
+#define EPD_PIN_RST   47
+#define EPD_PIN_BUSY  48
+
+// E-paper SPI mapping.
+// MISO is not used by this panel.
+#define EPD_PIN_SCK   12
+#define EPD_PIN_MOSI  11
+
 #ifndef WHITE
 #define WHITE 0xFF
 #endif
