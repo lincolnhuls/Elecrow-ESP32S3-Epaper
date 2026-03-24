@@ -6,17 +6,17 @@
 
 void EPD_GPIOInit(void)
 {
-  pinMode(45, OUTPUT); // CS
-  pinMode(46, OUTPUT); // DC
-  pinMode(47, OUTPUT); // RST
-  pinMode(48, INPUT);  // BUSY
+  pinMode(EPD_PIN_CS, OUTPUT);
+  pinMode(EPD_PIN_DC, OUTPUT);
+  pinMode(EPD_PIN_RST, OUTPUT);
+  pinMode(EPD_PIN_BUSY, INPUT);
 
-  digitalWrite(45, HIGH);
-  digitalWrite(46, HIGH);
-  digitalWrite(47, HIGH);
+  digitalWrite(EPD_PIN_CS, HIGH);
+  digitalWrite(EPD_PIN_DC, HIGH);
+  digitalWrite(EPD_PIN_RST, HIGH);
 
-  // SCK=12, MOSI=11, no MISO, CS handled manually in driver
-  SPI.begin(12, -1, 11, 45);
+  // no MISO, CS handled manually in the display driver
+  SPI.begin(EPD_PIN_SCK, -1, EPD_PIN_MOSI, EPD_PIN_CS);
 }
 
 void EPD_READBUSY(void)
