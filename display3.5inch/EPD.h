@@ -9,8 +9,8 @@
 
 // E-paper control pin mapping.
 // Update these if your new board routes the display to different GPIOs.
-#define EPD_PIN_CS    45
-#define EPD_PIN_DC    46
+#define EPD_PIN_CS    10
+#define EPD_PIN_DC    15
 #define EPD_PIN_RST   47
 #define EPD_PIN_BUSY  48
 

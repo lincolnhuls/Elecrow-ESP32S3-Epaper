@@ -36,6 +36,11 @@ int compareRSSI = 0;
 int currentRSSI = 0;
 int lastRSSI = 0;
 
+// Pins for onboard led
+#define R 4
+#define G 5
+#define B 6
+
 // Declare the WiFiManager and Preferences(non-volitile storage) to use in code
 WiFiManager wifiManager;
 Preferences prefs;
@@ -1205,8 +1210,30 @@ void showRegisteringScreen() {
 void setup() {
   Serial.begin(115200);
   pinMode(7, OUTPUT);
+  pinMode(R, OUTPUT);
+  pinMode(G, OUTPUT);
+  pinMode(B, OUTPUT);
   digitalWrite(7, HIGH);
   chipid = ESP.getEfuseMac();
+
+  digitalWrite(R, LOW);
+  digitalWrite(G, HIGH);
+  digitalWrite(B, HIGH);
+  delay(1000);
+  digitalWrite(R, HIGH);
+  digitalWrite(G, LOW);
+  digitalWrite(B, HIGH);
+  delay(1000);
+  digitalWrite(R, HIGH);
+  digitalWrite(G, HIGH);
+  digitalWrite(B, LOW);
+  delay(1000);
+  digitalWrite(R, HIGH);
+  digitalWrite(G, HIGH);
+  digitalWrite(B, HIGH);
+  delay(1000);
+  
+
 
   // Create small code for wh connection
   snprintf(shortId, sizeof(shortId), "%06X", (uint32_t)(chipid & 0xFFFFFF));
