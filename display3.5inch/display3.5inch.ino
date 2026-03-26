@@ -40,6 +40,15 @@ int currentRSSI = 0;
 #define G 5
 #define B 6
 
+// Pin for measuring battery voltage
+const int BATTERY_PIN = 3;
+
+// Divider ratio of the circuit
+const float DIVIDER_RATIO = 4.5;
+
+// Variable for displaying the voltage
+float v = 0.0;
+
 // Pin for led and screen power
 #define SCREEN 7
 #define LED 14
@@ -50,6 +59,49 @@ Preferences prefs;
 
 #define MAX_SLOTS 25
 #define MAX_RANGES 25
+
+struct LedRange {
+  uint16_t start;
+  uint16_t count;
+};
+
+enum EffectType : uint8_t {
+  EFFECT_NONE = 0,
+  EFFECT_ON,
+  EFFECT_BLINK,
+  EFFECT_BREATHE,
+  EFFECT_MASK_OFF
+};
+
+struct LedSlot {
+  bool active = false;
+  EffectType type = EFFECT_NONE;
+
+  // Color and intensity caps
+  uint8_t r = 255, g = 255, b = 255;
+  uint8_t maxBrightness = 255;
+
+  // Ranges owned by slot
+  LedRange ranges[MAX_RANGES];
+  uint8_t rangeCount = 0;
+
+  uint32_t lastFrameMs = 0;
+
+  // ON
+  uint32_t offAtMs = 0;
+
+  // BLINK
+  bool blinkIsOn = false;
+  uint16_t blinkIntervalMs = 500;
+  uint16_t blinkRemainingToggles = 0;
+  uint32_t blinkNextToggleMs = 0;
+
+  // BREATHE
+  uint16_t phase16 = 0;
+  uint16_t phaseStep = 1;
+};
+
+LedSlot slots[MAX_SLOTS];
 
 // Rotation for easy rotation applications
 int ROTATION = 0;
@@ -99,8 +151,8 @@ unsigned long lastMqttAttemptMs = 0;
 unsigned long lastRegisterAttemptMs = 0;
 
 // Timers for heartbeat
-unsigned long lastHeartbeatMs = 0;
-const unsigned long HEARTBEAT_PERIOD_MS = 30000;
+unsigned long lastHeartbeatMs = 299999;
+const unsigned long HEARTBEAT_PERIOD_MS = 300000;
 
 // Declare strings
 String SERVICE_UUID = "";
@@ -147,6 +199,7 @@ void remove();
 bool requestRegister();
 void showBootScreenBase();
 void updateBootDots(uint8_t dotCount);
+float readBatteryVoltage();
 
 // Declare space for chipid and shortId
 uint64_t chipid;
@@ -168,52 +221,35 @@ const char* brokerName = "fuelbroker";
 const char* brokerPassword = "N3tJPFTHYYNcsHw";
 /////////////////////////////////////////////////////////////
 
+/////////////////////////////// Battery Voltage Reading ///////////////////////////////
+float readBatteryVoltage() {
+  long totalMv = 0;
+  const int samples = 20;
+
+  for (int i = 0; i < samples; i++) {
+    totalMv += analogReadMilliVolts(BATTERY_PIN);
+    delay(2);
+  }
+
+  float pinMv = totalMv / (float)samples;
+  float pinVoltage = pinMv / 1000.0;
+  float batteryVoltage = pinVoltage * DIVIDER_RATIO + .2;
+
+  Serial.println(pinMv);
+  Serial.println(pinVoltage, 6);
+  Serial.print("Battery Voltage: ");
+  Serial.print(batteryVoltage, 6);
+  Serial.println(" V");
+
+  return batteryVoltage;
+}
+////////////////////////////////////////////////////////////////////////////////////////
+
 
 ////////////////////////////////////// Led Functions //////////////////////////////////////
 
 // Slot creation so multiple areas on the cart can be on and updated at the same time
-struct LedRange {
-  uint16_t start;
-  uint16_t count;
-};
 
-enum EffectType : uint8_t {
-  EFFECT_NONE = 0,
-  EFFECT_ON,
-  EFFECT_BLINK,
-  EFFECT_BREATHE,
-  EFFECT_MASK_OFF
-};
-
-struct LedSlot {
-  bool active = false;
-  EffectType type = EFFECT_NONE;
-
-  // Color and intensity caps
-  uint8_t r = 255, g = 255, b = 255;
-  uint8_t maxBrightness = 255;
-
-  // Ranges owned by slot
-  LedRange ranges[MAX_RANGES];
-  uint8_t rangeCount = 0;
-
-  uint32_t lastFrameMs = 0;
-
-  // ON
-  uint32_t offAtMs = 0;
-
-  // BLINK
-  bool blinkIsOn = false;
-  uint16_t blinkIntervalMs = 500;
-  uint16_t blinkRemainingToggles = 0;
-  uint32_t blinkNextToggleMs = 0;
-
-  // BREATHE
-  uint16_t phase16 = 0;
-  uint16_t phaseStep = 1;
-};
-
-LedSlot slots[MAX_SLOTS];
 
 uint32_t ledsLastFrameMs = 0;
 const uint16_t LED_FRAME_MS = 15;
@@ -1143,6 +1179,9 @@ void heartbeat() {
   if (millis() - lastHeartbeatMs < HEARTBEAT_PERIOD_MS) return;
   lastHeartbeatMs = millis();
 
+  v = readBatteryVoltage();
+  Serial.println(v);
+
   currentRSSI = WiFi.RSSI();
 
   StaticJsonDocument<256> doc;
@@ -1153,6 +1192,7 @@ void heartbeat() {
   doc["ip"] = WiFi.localIP().toString();
   doc["rssi"] = currentRSSI;
   doc["version"] = CURRENT_VERSION;
+  doc["voltage"] = v;
 
   if (currentRSSI >= compareRSSI + 10 || currentRSSI <= compareRSSI - 10) {
     showConnectedDashboard();
@@ -1216,6 +1256,8 @@ void showRegisteringScreen() {
 // ----------------------------------------------------
 void setup() {
   Serial.begin(115200);
+  analogReadResolution(12);
+  analogSetPinAttenuation(BATTERY_PIN, ADC_11db);
   pinMode(SCREEN, OUTPUT);
   pinMode(LED, OUTPUT);
   pinMode(R, OUTPUT);
@@ -1452,6 +1494,9 @@ void showConnectedDashboard() {
 
   snprintf(buffer, sizeof(buffer), "Ver: %s", CURRENT_VERSION.c_str());
   EPD_ShowString(10, 146, buffer, 16, BLACK);
+
+  snprintf(buffer, sizeof(buffer), "Voltage: %.3f V", v);
+  EPD_ShowString(10, 166, buffer, 16, BLACK);
 
   displayQRCodeOnEPD(SERVICE_UUID.c_str(), -1, QR_LARGE_SCALE);
 
