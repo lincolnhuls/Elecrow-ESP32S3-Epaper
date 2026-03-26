@@ -1,10 +1,10 @@
 // Flash settings for this board are fairly specific
 // 
 // Board: ESP32S3 Dev Module 
-// Flash Size: 8MB (64Mb)
+// Flash Size: 16MB (128Mb)
 // Partition Scheme: "8M with spiffs (3MB APP/1.5MB SPIFFS)"
 // PSRAM: "OPI PSRAM"
-// Upload Speed: "460800" (Board will not upload if this is not set) 
+// Upload Speed: "921600"
 
 // Import needed libraries
 #include <DTF_ESP32Update.h>
@@ -34,12 +34,15 @@ bool dtfCheckedInThisBoot = false;
 // RSSI values for comparing and updating screen if needed
 int compareRSSI = 0;
 int currentRSSI = 0;
-int lastRSSI = 0;
 
 // Pins for onboard led
 #define R 4
 #define G 5
 #define B 6
+
+// Pin for led and screen power
+#define SCREEN 7
+#define LED 14
 
 // Declare the WiFiManager and Preferences(non-volitile storage) to use in code
 WiFiManager wifiManager;
@@ -159,7 +162,7 @@ char mqttPayloadBuff[1024];
 String secret;
 String deviceName;
 
-///////////////// MQTT Broker Setup //////////////////////////
+///////////////// MQTT Broker Setup //////////////////////////  
 const char* mqttServer = "mqttbroker.tetontechnology.com";
 const char* brokerName = "fuelbroker";
 const char* brokerPassword = "N3tJPFTHYYNcsHw";
@@ -820,6 +823,7 @@ void handleMqttMessage() {
   }
 
   if (strcmp(cmd, "on") == 0) {
+    digitalWrite(LED, HIGH);
     uint8_t r = doc["r"] | 255;
     uint8_t g = doc["g"] | 255;
     uint8_t b = doc["b"] | 255;
@@ -865,6 +869,7 @@ void handleMqttMessage() {
   }
 
   if (strcmp(cmd, "blink") == 0) {
+    digitalWrite(LED, HIGH);
     uint8_t r = doc["r"] | 255;
     uint8_t g = doc["g"] | 255;
     uint8_t b = doc["b"] | 255;
@@ -910,6 +915,7 @@ void handleMqttMessage() {
   }
 
   if (strcmp(cmd, "breathe") == 0) {
+    digitalWrite(LED, HIGH);
     uint8_t r = doc["r"] | 255;
     uint8_t g = doc["g"] | 255;
     uint8_t b = doc["b"] | 255;
@@ -961,6 +967,7 @@ void handleMqttMessage() {
     bool all = doc["all"] | false;
 
     if (all || !doc.containsKey("ledList")) {
+      digitalWrite(LED, LOW);
       stopLedEffects();
       forceLedRender = true;
       return;
@@ -1209,11 +1216,13 @@ void showRegisteringScreen() {
 // ----------------------------------------------------
 void setup() {
   Serial.begin(115200);
-  pinMode(7, OUTPUT);
+  pinMode(SCREEN, OUTPUT);
+  pinMode(LED, OUTPUT);
   pinMode(R, OUTPUT);
   pinMode(G, OUTPUT);
   pinMode(B, OUTPUT);
-  digitalWrite(7, HIGH);
+  digitalWrite(SCREEN, HIGH);
+  digitalWrite(LED, LOW);
   chipid = ESP.getEfuseMac();
 
   digitalWrite(R, LOW);
@@ -1335,6 +1344,12 @@ void setup() {
 // LOOP 
 // ----------------------------------------------------
 void loop() {
+  // int state = digitalRead(LED);
+  // if (state == HIGH) {
+  //   Serial.println("LED is HIGH");
+  // } else {
+  //   Serial.println("LED is LOW");
+  // }
   if (WiFi.status() != WL_CONNECTED) {
     connectedScreenShown = false;
     registeringScreenShown = false;
