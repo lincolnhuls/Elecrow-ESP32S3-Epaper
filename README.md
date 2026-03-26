@@ -115,7 +115,8 @@ To use OTA updates for the device use the following command
   "ledList": [[0,10]]
 }
 ```
-  > Off also has an optional argument, "all", which when sent with the flag true acts as a global off, turning all leds off, no longer requiring a range
+  > Off also has an optional argument, "all", which when sent with the flag true acts as a global off, turning all leds off, no longer requiring a range.
+
   > For the LEDs power off pin, to toggle the pin to low and shut off power to the LEDs, you must use the all flag set to true. If the all flag is not used the pin will not be set to low  
 ```json
 {
