@@ -19,6 +19,15 @@ Use the following **exact** settings in the Arduino IDE or PlatformIO:
 - **Upload Speed:** 460800  
   > ⚠️ Upload will fail if this is not set correctly
 
+
+If using the new 3.5 inch board the upload scheme is different:
+
+- **Board:** ESP32S3 Dev Module  
+- **Flash Size:** 16MB (128Mb)  
+- **Partition Scheme:** "8M with spiffs (3MB APP/1.5MB SPIFFS)"  
+- **PSRAM:** OPI PSRAM  
+- **Upload Speed:** 921600
+
 ---
 ### All device commands must be sent on wh/device/device-uuid
 ---
@@ -48,6 +57,9 @@ To use OTA updates for the device use the following command
 ---
 
 ### Using the LEDs
+
+- **LED Power Pin**
+  > The LEDs have a power pin that can be used to set the power to the LEDs on or off. Every command that turns the LEDs on first sets the pin HIGH to allow power flow. The pin is toggled LOW to shut off the power only when the off command is sent with the "all" flag set to true
 
 - **On**
   > Defaults to white staying on until off command is received. Duration -1 means on until cmd off or new command, set to an int for an auto shut off after that many seconds
@@ -104,6 +116,7 @@ To use OTA updates for the device use the following command
 }
 ```
   > Off also has an optional argument, "all", which when sent with the flag true acts as a global off, turning all leds off, no longer requiring a range
+  > For the LEDs power off pin, to toggle the pin to low and shut off power to the LEDs, you must use the all flag set to true. If the all flag is not used the pin will not be set to low  
 ```json
 {
   "secret": "yourSecret",
