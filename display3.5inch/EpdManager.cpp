@@ -76,35 +76,31 @@ void EpdManager::updateUpdatingDots(uint8_t dotCount) {
   EPD_Dis_PartAll(ImageBW);
 }
 
-void EpdManager::showConnectedDashboard(const char* ssid, IPAddress ip, long rssi, String deviceId, String currentVersion, float v) {
+void EpdManager::showConnectedDashboard(IPAddress ip, long rssi, String deviceId, String currentVersion) {
   EPD_FastInit();
 
   Paint_NewImage(ImageBW, EPD_W, EPD_H, ROTATION, WHITE);
   Paint_Clear(WHITE);
 
-  EPD_ShowString(10, 10, "CONNECTED", 16, BLACK);
+  EPD_ShowString(10, 13, "WiFi Connected", 16, BLACK);
 
-  snprintf(buffer, sizeof(buffer), "SSID: %s", ssid);
-  EPD_ShowString(10, 30, buffer, 16, BLACK);
+  EPD_ShowString(10, 41, "Mqtt Connected", 16, BLACK);
 
   snprintf(buffer, sizeof(buffer), "IP: %s", ip.toString().c_str());
-  EPD_ShowString(10, 50, buffer, 16, BLACK);
+  EPD_ShowString(10, 70, buffer, 16, BLACK);
 
   compareRSSI = rssi;
   snprintf(buffer, sizeof(buffer), "Signal: %ld dBm", rssi);
-  EPD_ShowString(10, 70, buffer, 16, BLACK);
+  EPD_ShowString(10, 98, buffer, 16, BLACK);
 
   int bars = rssiToBars(rssi);
-  drawWiFiIcon(10, 92, bars);
+  drawWiFiIcon(140, 88, bars);
 
   snprintf(buffer, sizeof(buffer), "ID: %s", deviceId.c_str());
-  EPD_ShowString(10, 126, buffer, 16, BLACK);
+  EPD_ShowString(10, 127, buffer, 16, BLACK);
 
   snprintf(buffer, sizeof(buffer), "Ver: %s", currentVersion.c_str());
-  EPD_ShowString(10, 146, buffer, 16, BLACK);
-
-  snprintf(buffer, sizeof(buffer), "Voltage: %.3f V", v);
-  EPD_ShowString(10, 166, buffer, 16, BLACK);
+  EPD_ShowString(10, 155, buffer, 16, BLACK);
 
   displayQRCodeOnEPD(deviceId.c_str(), -1, QR_LARGE_SCALE);
 
@@ -127,6 +123,29 @@ void EpdManager::setCurrentRSSI(long rssi) {
 long EpdManager::getCurrentRSSI() {
   return currentRSSI;
 }
+
+void EpdManager::showClockScreen() {
+  EPD_FastInit();
+
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, ROTATION, WHITE);
+  Paint_Clear(WHITE);
+
+  EPD_ShowString(10, 13, "Syncing Clock...", 16, BLACK);
+
+  EPD_WhiteScreen_ALL_Fast(ImageBW);
+}
+
+void EpdManager::showMqttScreen() {
+  EPD_FastInit();
+
+  Paint_NewImage(ImageBW, EPD_W, EPD_H, ROTATION, WHITE);
+  Paint_Clear(WHITE);
+
+  EPD_ShowString(10, 13, "Connecting to Mqtt...", 16, BLACK);
+
+  EPD_WhiteScreen_ALL_Fast(ImageBW);
+}
+
 
 // ======================= Private Methods =======================
 

@@ -15,11 +15,13 @@ public:
   void updateBootDots(uint8_t dotCount);
   void showUpdatingScreenBase();
   void updateUpdatingDots(uint8_t dotCount);
-  void showConnectedDashboard(const char* ssid, IPAddress ip, long rssi, String deviceId, String currentVersion, float v);
+  void showConnectedDashboard(IPAddress ip, long rssi, String deviceId, String currentVersion);
   void setConnectedScreenShown(bool value);
   bool getConnectedScreenShown();
   void setCurrentRSSI(long rssi);
   long getCurrentRSSI();
+  void showClockScreen();
+  void showMqttScreen();
 
 private:
   // Methods

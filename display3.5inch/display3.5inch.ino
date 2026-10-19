@@ -30,14 +30,14 @@ EpdManager epd;
 const char *WIFI_SSID = "Teton";
 const char *WIFI_PASSWORD = "tetonfuel";
 // Empty host = Wi-Fi gateway IP (warehouse edge default). Or hostname/IP for test broker.
-const char *MQTT_BROKER_HOST = "mqttbroker.tetontechnology.com";
+const char *MQTT_BROKER_HOST = "";
 const uint16_t MQTT_BROKER_PORT = 1883;
 // Edge deployment: leave username and password empty. MQTTX / test broker: set both.
 const char *MQTT_USERNAME = "";
 const char *MQTT_PASSWORD = "";
 String P2L_MODEL = "elecrow-epaper-3.5";
 unsigned long HEARTBEAT_PERIOD_MS = 300000; // 5 minutes for battery devices
-String CURRENT_VERSION = "1.0.3";
+String CURRENT_VERSION = "1.0.4";
 String DTF_PRODUCT_ID = "e2e5ee12-254d-458c-883c-7f9db5215e0e";
 String deviceId;
 String sessionId;
@@ -50,15 +50,6 @@ const unsigned long NTP_RETRY_MS = 30000;
 
 // Flag for software update
 bool needToUpdate = false;
-
-// Pin for measuring battery voltage
-const int BATTERY_PIN = 3;
-
-// Divider ratio of the circuit
-const float DIVIDER_RATIO = 4.5;
-
-// Variable for displaying the voltage
-float v = 0.0;
 
 bool mqttWasConnected = false;
 bool mqttBrokerConfigured = false;
@@ -100,29 +91,6 @@ volatile bool mqttMsgReady = false;
 char mqttTopicBuff[256];
 char mqttPayloadBuff[1024];
 
-/////////////////////////////// Battery Voltage Reading //////////////////////////////////
-float readBatteryVoltage() {
-  long totalMv = 0;
-  const int samples = 20;
-
-  for (int i = 0; i < samples; i++) {
-    totalMv += analogReadMilliVolts(BATTERY_PIN);
-    delay(2);
-  }
-
-  float pinMv = totalMv / (float)samples;
-  float pinVoltage = pinMv / 1000.0;
-  float batteryVoltage = pinVoltage * DIVIDER_RATIO + .2;
-
-  Serial.println(pinMv);
-  Serial.println(pinVoltage, 6);
-  Serial.print("Battery Voltage: ");
-  Serial.print(batteryVoltage, 6);
-  Serial.println(" V");
-
-  return batteryVoltage;
-}
-
 void buildDeviceId() {
   uint8_t mac[6];
   WiFi.macAddress(mac);
@@ -136,6 +104,8 @@ void buildDeviceId() {
 }
 
 void updateMqttBrokerFromNetwork() {
+  epd.setConnectedScreenShown(false);
+  epd.showMqttScreen();
   if (MQTT_BROKER_HOST == nullptr || MQTT_BROKER_HOST[0] == '\0') {
     IPAddress broker = WiFi.gatewayIP();
     if (broker == IPAddress(0, 0, 0, 0)) {
@@ -172,6 +142,7 @@ void onTransportLost() {
 }
 
 bool ensureFactoryWiFi() {
+  epd.setConnectedScreenShown(false);
   if (WiFi.status() == WL_CONNECTED) {
     return true;
   }
@@ -180,6 +151,7 @@ bool ensureFactoryWiFi() {
   }
   lastWifiAttemptMs = millis();
   Serial.println("WiFi reconnect (factory credentials)...");
+  epd.showBootScreenBase();
   WiFi.disconnect();
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -368,9 +340,6 @@ void heartbeat() {
 
   deviceSequence++;
 
-  v = readBatteryVoltage();
-  Serial.println(v);
-
   epd.setCurrentRSSI(WiFi.RSSI());
 
   StaticJsonDocument<512> doc;
@@ -405,10 +374,6 @@ void heartbeat() {
   }
   if (WiFi.status() == WL_CONNECTED) {
     payload["rssi"] = epd.getCurrentRSSI();
-  }
-
-  if (v > 0.05f) {
-    payload["voltage"] = v;
   }
 
   char out[768];
@@ -467,8 +432,6 @@ bool ensureClockSynced() {
 // ----------------------------------------------------
 void setup() {
   Serial.begin(115200);
-  analogReadResolution(12);
-  analogSetPinAttenuation(BATTERY_PIN, ADC_11db);
 
   leds.init();
   epd.init();
@@ -508,6 +471,8 @@ void setup() {
     }
   }
 
+  Serial.println("Connected to WiFi, no longer updating the animation screen");
+
   updateMqttBrokerFromNetwork();
 }
 
@@ -528,7 +493,8 @@ void loop() {
   }
 
   if (!clockSynced) {
-    if (millis() - lastNtpAttemptMs >= NTP_RETRY_MS) {
+    if (lastNtpAttemptMs == 0 || millis() - lastNtpAttemptMs >= NTP_RETRY_MS) {
+      epd.showClockScreen();
       lastNtpAttemptMs = millis();
       ensureClockSynced();
     }
@@ -555,13 +521,13 @@ void loop() {
   } else if (!clockSynced || gatewayId.length() == 0) {
     leds.blinkLed("cyan", 333);
   } else {
-    leds.fadeLed("green");
+    leds.fadeLed("cyan");
   }
 
-  if (!epd.getConnectedScreenShown() && mqttClient.connected() && clockSynced &&
+  if (!epd.getConnectedScreenShown() && WiFi.status() == WL_CONNECTED && mqttClient.connected() && clockSynced &&
       gatewayId.length() > 0) {
     epd.setConnectedScreenShown(true);
-    epd.showConnectedDashboard(WiFi.SSID().c_str(), WiFi.localIP(), WiFi.RSSI(), deviceId, CURRENT_VERSION, v);
+    epd.showConnectedDashboard(WiFi.localIP(), WiFi.RSSI(), deviceId, CURRENT_VERSION);
   }
 
   if (needToUpdate) {
@@ -582,6 +548,11 @@ void loop() {
       Serial.println((int)response);
 
       needToUpdate = false;
+
+      // If we are already up to date we need to go back to the regular connected screen
+      if ((int)response == 4) {
+        epd.setConnectedScreenShown(false);
+      }
     } else {
       Serial.println("Software Update Pending. Need to connect to internet "
                      "before update.");
