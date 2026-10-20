@@ -7,7 +7,6 @@
 // Board: ESP32S3 Dev Module
 // Flash Size: 16MB (128Mb)
 // Partition Scheme: "8M with spiffs (3MB APP/1.5MB SPIFFS)"
-// PSRAM: "OPI PSRAM"
 // Upload Speed: "921600"
 
 // Import needed libraries
@@ -20,15 +19,20 @@
 #include <algorithm>
 #include <esp_system.h>
 #include <time.h>
+#include <esp_task_wdt.h>
 #include "LedManager.h"
 #include "EpdManager.h"
+
+// ===================== TASKS =====================
+TaskHandle_t Task1;
+TaskHandle_t Task2;
 
 LedManager leds;
 EpdManager epd;
 
 // Factory provisioning (re-flash to change). See contract/EDGE_LIGHT_PROTOCOL.md
-const char *WIFI_SSID = "Teton";
-const char *WIFI_PASSWORD = "tetonfuel";
+const char *WIFI_SSID = "";
+const char *WIFI_PASSWORD = "";
 // Empty host = Wi-Fi gateway IP (warehouse edge default). Or hostname/IP for test broker.
 const char *MQTT_BROKER_HOST = "";
 const uint16_t MQTT_BROKER_PORT = 1883;
@@ -439,6 +443,15 @@ void setup() {
   mqttClient.setCallback(WiFi_callback);
   mqttClient.setBufferSize(1024);
 
+  xTaskCreatePinnedToCore(Task1Code, "Task1", 30000, NULL, 9, &Task1, 1);
+  xTaskCreatePinnedToCore(Task2Code, "Task2", 25000, NULL, 10, &Task2, 0);
+}
+
+// ----------------------------------------------------
+// LOOP
+// ----------------------------------------------------
+void Task1Code(void *pvParameters) {
+  (void) pvParameters;   
   epd.showBootScreenBase();
 
   WiFi.mode(WIFI_STA);
@@ -474,88 +487,98 @@ void setup() {
   Serial.println("Connected to WiFi, no longer updating the animation screen");
 
   updateMqttBrokerFromNetwork();
+
+  while (true) {
+    if (WiFi.status() != WL_CONNECTED) {
+      onTransportLost();
+      mqttBrokerConfigured = false;
+      ensureFactoryWiFi();
+      leds.ledTick();
+    } 
+    else {
+      if (!mqttBrokerConfigured) {
+        updateMqttBrokerFromNetwork();
+      }
+
+      if (!clockSynced) {
+        if (lastNtpAttemptMs == 0 || millis() - lastNtpAttemptMs >= NTP_RETRY_MS) {
+          epd.showClockScreen();
+          lastNtpAttemptMs = millis();
+          ensureClockSynced();
+        }
+      }
+
+      mqttClient.loop();
+      handleMqttMessage();
+
+      mqttConnectAttempt();
+
+      if (mqttWasConnected && !mqttClient.connected()) {
+        onTransportLost();
+      }
+      mqttWasConnected = mqttClient.connected();
+
+      heartbeat();
+
+      leds.ledTick();
+
+      if (!epd.getConnectedScreenShown() && WiFi.status() == WL_CONNECTED && mqttClient.connected() && clockSynced &&
+          gatewayId.length() > 0) {
+        epd.setConnectedScreenShown(true);
+        epd.showConnectedDashboard(WiFi.localIP(), WiFi.RSSI(), deviceId, CURRENT_VERSION);
+      }
+
+      if (needToUpdate) {
+        if (WiFi.status() == WL_CONNECTED) {
+          Serial.println("Updating Firmware");
+
+          epd.showUpdatingScreenBase();
+
+          for (uint8_t i = 0; i < 4; i++) {
+            epd.updateUpdatingDots(i % 4); // 0,1,2,3
+            delay(300);
+          }
+
+          auto response = DTF_ESP32Update::getFirmwareUpdate(
+              DTF_PRODUCT_ID.c_str(), CURRENT_VERSION.c_str());
+
+          Serial.print("DTF Response: ");
+          Serial.println((int)response);
+
+          needToUpdate = false;
+
+          // If we are already up to date we need to go back to the regular connected screen
+          if ((int)response == 4) {
+            epd.setConnectedScreenShown(false);
+          }
+        } else {
+          Serial.println("Software Update Pending. Need to connect to internet "
+                        "before update.");
+        }
+      }
+    }
+    vTaskDelay(1);
+  }
 }
 
-// ----------------------------------------------------
-// LOOP
-// ----------------------------------------------------
-void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
-    onTransportLost();
-    mqttBrokerConfigured = false;
-    ensureFactoryWiFi();
-    leds.ledTick();
-    return;
-  }
-
-  if (!mqttBrokerConfigured) {
-    updateMqttBrokerFromNetwork();
-  }
-
-  if (!clockSynced) {
-    if (lastNtpAttemptMs == 0 || millis() - lastNtpAttemptMs >= NTP_RETRY_MS) {
-      epd.showClockScreen();
-      lastNtpAttemptMs = millis();
-      ensureClockSynced();
-    }
-  }
-
-  mqttClient.loop();
-  handleMqttMessage();
-
-  mqttConnectAttempt();
-
-  if (mqttWasConnected && !mqttClient.connected()) {
-    onTransportLost();
-  }
-  mqttWasConnected = mqttClient.connected();
-
-  heartbeat();
-
-  leds.ledTick();
-
-  if (needToUpdate) {
-    leds.fadeLed("magenta");
-  } else if (!mqttClient.connected()) {
-    leds.blinkLed("green", 333);
-  } else if (!clockSynced || gatewayId.length() == 0) {
-    leds.blinkLed("cyan", 333);
-  } else {
-    leds.fadeLed("cyan");
-  }
-
-  if (!epd.getConnectedScreenShown() && WiFi.status() == WL_CONNECTED && mqttClient.connected() && clockSynced &&
-      gatewayId.length() > 0) {
-    epd.setConnectedScreenShown(true);
-    epd.showConnectedDashboard(WiFi.localIP(), WiFi.RSSI(), deviceId, CURRENT_VERSION);
-  }
-
-  if (needToUpdate) {
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("Updating Firmware");
-
-      epd.showUpdatingScreenBase();
-
-      for (uint8_t i = 0; i < 4; i++) {
-        epd.updateUpdatingDots(i % 4); // 0,1,2,3
-        delay(300);
-      }
-
-      auto response = DTF_ESP32Update::getFirmwareUpdate(
-          DTF_PRODUCT_ID.c_str(), CURRENT_VERSION.c_str());
-
-      Serial.print("DTF Response: ");
-      Serial.println((int)response);
-
-      needToUpdate = false;
-
-      // If we are already up to date we need to go back to the regular connected screen
-      if ((int)response == 4) {
-        epd.setConnectedScreenShown(false);
-      }
+void Task2Code(void *pvParameters) {
+  (void) pvParameters;
+  while (true) {
+    if (WiFi.status() != WL_CONNECTED) {
+      leds.blinkLed("green", 100);
+    } else if (needToUpdate) {
+      leds.fadeLed("magenta");
+    } else if (!mqttClient.connected()) {
+      leds.fadeLed("yellow");
+    } else if (!clockSynced || gatewayId.length() == 0) {
+      leds.blinkLed("cyan", 333);
     } else {
-      Serial.println("Software Update Pending. Need to connect to internet "
-                     "before update.");
+      leds.fadeLed("cyan");
     }
+    vTaskDelay(1);
   }
+}
+
+void loop() {
+  delay(1);
 }
