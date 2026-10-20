@@ -7,11 +7,7 @@
 ---
 ### In the PubSubClient library, the PubSubClient.h file has a hardcoded buffer, #define MQTT_MAX_PACKET_SIZE, that needs to be expanded. 5000 should work.
 ---
-
----
 ### When flashing code you must enter in the network SSID and Password before you upload otherwise connection will fail. There is no external WiFi setup. If no broker host, username, or password is put in the device will try to connect to a broker at the local IP without a username or password.
----
-
 ---
 ### Device subscribes to warehouse/v1/gateway and its own command topic, light/{deviceUUID}/command. Once it receives the retained gateway announcement it takes the gatewayId and starts publishing heartbeats on 5 minute intervals.  
 ---
