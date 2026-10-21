@@ -84,5 +84,23 @@ To use OTA updates for the device use the following command
 { "payload": { "cmd": "off", "all": true } }
 ```
 
+- **Remove**
+  > Removing the light in Settings → Devices sends remove and deletes the device. That heartbeat re-adopts it as a new, unconfigured device. Wi-Fi, broker and board ID stay as flashed; there is no factory reset over the wire. Only a device's own heartbeat or message adopts it; the edge's report that it sent remove cannot bring the deleted device back.
+```json
+{ "payload": { "cmd": "remove" } }
+```
+
+- **Set Status**
+  > Show text on the screen as the light's status message, replacing any earlier one. text is required: printable ASCII only (0x20–0x7E), at least one character, no newlines. There is no length limit beyond the 1024-byte body; wrap the text to fit the screen and truncate what does not fit with .... The status stays until clear_status, remove or a reboot.
+```json
+{ "payload": { "cmd": "set_status", "text": "Wave 12 - 4 picks left" } }
+```
+
+- **Clear Status**
+  > Remove the status message and show the idle screen. Clearing when no status is shown does nothing.
+```json
+{ "payload": { "cmd": "clear_status" } }
+```
+
 
 
