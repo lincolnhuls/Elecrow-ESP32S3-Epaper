@@ -15,7 +15,7 @@ public:
   void updateBootDots(uint8_t dotCount);
   void showUpdatingScreenBase();
   void updateUpdatingDots(uint8_t dotCount);
-  void showConnectedDashboard(IPAddress ip, long rssi, String deviceId, String currentVersion);
+  void showConnectedDashboard(IPAddress ip, long rssi, const String& deviceId, const String& currentVersion, const String& status);
   void setConnectedScreenShown(bool value);
   bool getConnectedScreenShown();
   void setCurrentRSSI(long rssi);

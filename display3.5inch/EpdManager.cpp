@@ -76,7 +76,7 @@ void EpdManager::updateUpdatingDots(uint8_t dotCount) {
   EPD_Dis_PartAll(ImageBW);
 }
 
-void EpdManager::showConnectedDashboard(IPAddress ip, long rssi, String deviceId, String currentVersion) {
+void EpdManager::showConnectedDashboard(IPAddress ip, long rssi, const String& deviceId, const String& currentVersion, const String& status) {
   EPD_FastInit();
 
   Paint_NewImage(ImageBW, EPD_W, EPD_H, ROTATION, WHITE);
@@ -86,20 +86,59 @@ void EpdManager::showConnectedDashboard(IPAddress ip, long rssi, String deviceId
 
   EPD_ShowString(10, 41, "Mqtt Connected", 16, BLACK);
 
-  snprintf(buffer, sizeof(buffer), "IP: %s", ip.toString().c_str());
-  EPD_ShowString(10, 70, buffer, 16, BLACK);
+  constexpr uint16_t STATUS_X = 10;
+  constexpr uint16_t STATUS_Y1 = 70;
+  constexpr uint16_t STATUS_Y2 = 98;
+  constexpr size_t STATUS_MAX_CHARS = 29;
+
+  String line1;
+  String line2;
+  String remaining = status;
+
+  remaining.trim();
+  
+  constexpr size_t PREFIX_LENGTH = 8;
+  constexpr size_t FIRST_LINE_CHARS = STATUS_MAX_CHARS - PREFIX_LENGTH;
+
+  if (remaining.length() <= FIRST_LINE_CHARS) { 
+    line1 = remaining; 
+  } else { 
+    int splitAt = remaining.lastIndexOf(' ', FIRST_LINE_CHARS); 
+
+    if (splitAt <= 0) { 
+      splitAt = FIRST_LINE_CHARS;
+    } 
+  
+    line1 = remaining.substring(0, splitAt); 
+    remaining = remaining.substring( splitAt < FIRST_LINE_CHARS ? splitAt + 1 : splitAt ); 
+    remaining.trim(); 
+    if (remaining.length() > STATUS_MAX_CHARS) { 
+      int secondSplit = remaining.lastIndexOf(' ', STATUS_MAX_CHARS - 3); 
+      if (secondSplit > 0) { 
+        line2 = remaining.substring(0, secondSplit); 
+      } else { 
+        line2 = remaining.substring(0, STATUS_MAX_CHARS - 3);
+      } 
+      line2 += "..."; 
+    } else { 
+      line2 = remaining;
+    } 
+  }
+  snprintf(buffer, sizeof(buffer), "Status: %s", line1.c_str());
+  EPD_ShowString(STATUS_X, STATUS_Y1, buffer, 16, BLACK);
+
+  if (line2.length() > 0) {
+    EPD_ShowString(STATUS_X, STATUS_Y2, line2.c_str(), 16, BLACK);
+  }
 
   compareRSSI = rssi;
   snprintf(buffer, sizeof(buffer), "Signal: %ld dBm", rssi);
-  EPD_ShowString(10, 98, buffer, 16, BLACK);
-
-  int bars = rssiToBars(rssi);
-  drawWiFiIcon(140, 88, bars);
-
-  snprintf(buffer, sizeof(buffer), "ID: %s", deviceId.c_str());
   EPD_ShowString(10, 127, buffer, 16, BLACK);
 
-  snprintf(buffer, sizeof(buffer), "Ver: %s", currentVersion.c_str());
+  int bars = rssiToBars(rssi);
+  drawWiFiIcon(140, 117, bars);
+
+  snprintf(buffer, sizeof(buffer), "ID: %s", deviceId.c_str());
   EPD_ShowString(10, 155, buffer, 16, BLACK);
 
   displayQRCodeOnEPD(deviceId.c_str(), -1, QR_LARGE_SCALE);

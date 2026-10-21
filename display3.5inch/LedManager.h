@@ -12,8 +12,8 @@ private:
   static constexpr uint8_t G = 5;
   static constexpr uint8_t B = 6;
   static constexpr uint8_t LED = 14;
-  static constexpr uint8_t MAX_SLOTS = 25;
-  static constexpr uint8_t MAX_RANGES = 25;
+  static constexpr uint8_t MAX_SLOTS = 50;
+  static constexpr uint8_t MAX_RANGES = 50;
   struct LedRange {
     uint16_t start;
     uint16_t count;

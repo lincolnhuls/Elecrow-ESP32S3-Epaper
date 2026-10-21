@@ -57,6 +57,9 @@ bool needToUpdate = false;
 
 bool mqttWasConnected = false;
 bool mqttBrokerConfigured = false;
+volatile bool mqttConnectedForLed = false;
+volatile bool gatewayReadyForLed = false;
+bool mqttScreenShown = false;
 
 // Timers to help with state transitions
 unsigned long lastMqttAttemptMs = 0;
@@ -75,6 +78,10 @@ String wifiID;
 const char *gatewayTopic = "warehouse/v1/gateway";
 const char *commandTopic = nullptr;
 const char *heartbeatTopic = nullptr;
+
+// Text for Status from messages
+String status = "Available";
+bool statusUpdated = false;
 
 // Setup WiFi Client
 WiFiClient Wifi_net;
@@ -109,7 +116,6 @@ void buildDeviceId() {
 
 void updateMqttBrokerFromNetwork() {
   epd.setConnectedScreenShown(false);
-  epd.showMqttScreen();
   if (MQTT_BROKER_HOST == nullptr || MQTT_BROKER_HOST[0] == '\0') {
     IPAddress broker = WiFi.gatewayIP();
     if (broker == IPAddress(0, 0, 0, 0)) {
@@ -136,6 +142,8 @@ static bool mqttConnectWithCredentials() {
 
 void onTransportLost() {
   gatewayId = "";
+  gatewayReadyForLed = false;
+  mqttConnectedForLed = false;
   HeartbeatTopic = "";
   heartbeatTopic = nullptr;
   ntpStarted = false;
@@ -208,6 +216,7 @@ void handleMqttMessage() {
     }
 
     gatewayId = id;
+    gatewayReadyForLed = true;
 
     HeartbeatTopic =
         "warehouse/v1/" + gatewayId + "/devices/" + deviceId + "/events";
@@ -255,6 +264,18 @@ void handleMqttMessage() {
     return;
   }
 
+  else if (strcmp(cmd, "set_status") == 0) {
+    status = payload["text"].as<String>();
+    statusUpdated = true;
+    return;
+  }
+
+  else if (strcmp(cmd, "clear_status") == 0) {
+    status = "Available";
+    statusUpdated = true;
+    return;
+  }
+
    else leds.handleLightPayload(payload);
 }
 
@@ -273,6 +294,11 @@ void mqttConnectAttempt() {
 
   lastMqttAttemptMs = millis();
 
+  if (!mqttScreenShown) {
+    mqttScreenShown = true;
+    epd.showMqttScreen();
+  }
+
   Serial.println("Attempting MQTT connect...");
 
   if (mqttConnectWithCredentials()) {
@@ -281,9 +307,12 @@ void mqttConnectAttempt() {
       mqttClient.subscribe(commandTopic, 0);
     }
     gatewayId = "";
+    gatewayReadyForLed = false;
     lastHeartbeatMs = 0;
 
     Serial.println("MQTT connected + subscribed");
+
+    mqttScreenShown = false;
 
   } else {
     Serial.print("MQTT connect failed, state=");
@@ -304,8 +333,10 @@ void remove() {
   generateSessionId();
   deviceSequence = 0;
   gatewayId = "";
+  gatewayReadyForLed = false;
   HeartbeatTopic = "";
   heartbeatTopic = nullptr;
+  status = "Available";
   epd.setConnectedScreenShown(false);
   mqttWasConnected = false;
 }
@@ -517,6 +548,7 @@ void Task1Code(void *pvParameters) {
         onTransportLost();
       }
       mqttWasConnected = mqttClient.connected();
+      mqttConnectedForLed = mqttWasConnected;
 
       heartbeat();
 
@@ -525,7 +557,13 @@ void Task1Code(void *pvParameters) {
       if (!epd.getConnectedScreenShown() && WiFi.status() == WL_CONNECTED && mqttClient.connected() && clockSynced &&
           gatewayId.length() > 0) {
         epd.setConnectedScreenShown(true);
-        epd.showConnectedDashboard(WiFi.localIP(), WiFi.RSSI(), deviceId, CURRENT_VERSION);
+        epd.showConnectedDashboard(WiFi.localIP(), WiFi.RSSI(), deviceId, CURRENT_VERSION, status);
+      }
+
+      if (statusUpdated) {
+        statusUpdated = false;
+        epd.setConnectedScreenShown(true);
+        epd.showConnectedDashboard(WiFi.localIP(), WiFi.RSSI(), deviceId, CURRENT_VERSION, status);
       }
 
       if (needToUpdate) {
@@ -568,10 +606,10 @@ void Task2Code(void *pvParameters) {
       leds.blinkLed("green", 100);
     } else if (needToUpdate) {
       leds.fadeLed("magenta");
-    } else if (!mqttClient.connected()) {
+    } else if (!clockSynced) {
+      leds.blinkLed("cyan", 100); 
+    } else if (!mqttConnectedForLed || !gatewayReadyForLed) {
       leds.fadeLed("yellow");
-    } else if (!clockSynced || gatewayId.length() == 0) {
-      leds.blinkLed("cyan", 333);
     } else {
       leds.fadeLed("cyan");
     }
